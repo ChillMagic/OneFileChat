@@ -1,0 +1,16 @@
+.gitignore
+.venv/**
+.vscode/**
+.tmp-*/**
+en.png
+src/**
+tools/**
+tsconfig.json
+tsconfig.webview.json
+esbuild.webview.mjs
+esbuild.extension.mjs
+*.vsix
+media/vendor/**
+media/dist/*.map
+node_modules/**
+zh-CN.png

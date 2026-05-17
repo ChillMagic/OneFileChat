@@ -1,0 +1,8 @@
+node_modules/
+out/
+media/dist/
+.vscode/
+.venv/
+*.vsix
+**/.filechat/key.json
+

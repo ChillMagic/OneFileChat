@@ -1,0 +1,13 @@
+{
+  "extension.description": "把 AI 对话保存成可版本管理、可分支、可审阅的 .filechat.json 文件，并在 VS Code 中直接使用。",
+  "commands.newChatFile.title": "One File Chat: 新建聊天文件",
+  "commands.refreshSessions.title": "One File Chat: 刷新会话列表",
+  "commands.renameChatTitle.title": "重命名",
+  "commands.regenerateChatTitle.title": "重新生成标题",
+  "commands.deleteChatSession.title": "删除",
+  "commands.manageProviderConfig.title": "One File Chat: 管理聊天配置",
+  "commands.manageCommonConfig.title": "One File Chat: 管理通用配置",
+  "commands.viewRawChatJson.title": "查看原始数据",
+  "views.sessionsView.name": "One File Chat",
+  "customEditors.chatEditor.displayName": "One File Chat"
+}

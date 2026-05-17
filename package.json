@@ -1,0 +1,211 @@
+{
+  "name": "onefilechat",
+  "displayName": "One File Chat",
+  "description": "%extension.description%",
+  "version": "0.1.0",
+  "publisher": "chillmagic",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ChillMagic/OneFileChat.git"
+  },
+  "homepage": "https://github.com/ChillMagic/OneFileChat#readme",
+  "bugs": {
+    "url": "https://github.com/ChillMagic/OneFileChat/issues"
+  },
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "activationEvents": [
+    "workspaceContains:**/*.filechat.json",
+    "workspaceContains:**/.filechat/**"
+  ],
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "ai",
+    "chat",
+    "llm",
+    "openai",
+    "openai-compatible",
+    "prompt-history",
+    "conversation",
+    "git",
+    "json",
+    "custom-editor",
+    "workspace",
+    "markdown",
+    "latex",
+    "attachments",
+    "branching",
+    "version-history"
+  ],
+  "galleryBanner": {
+    "color": "#103648",
+    "theme": "dark"
+  },
+  "icon": "media/icon.png",
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "onefilechat.newChatFile",
+        "title": "%commands.newChatFile.title%",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "onefilechat.refreshSessions",
+        "title": "%commands.refreshSessions.title%",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "onefilechat.renameChatTitle",
+        "title": "%commands.renameChatTitle.title%",
+        "category": "One File Chat",
+        "enablement": "!listMultiSelection"
+      },
+      {
+        "command": "onefilechat.regenerateChatTitle",
+        "title": "%commands.regenerateChatTitle.title%",
+        "category": "One File Chat",
+        "enablement": "!listMultiSelection"
+      },
+      {
+        "command": "onefilechat.deleteChatSession",
+        "title": "%commands.deleteChatSession.title%",
+        "category": "One File Chat",
+        "enablement": "view == onefilechat.sessionsView && viewItem == onefilechatSession"
+      },
+      {
+        "command": "onefilechat.manageProviderConfig",
+        "title": "%commands.manageProviderConfig.title%"
+      },
+      {
+        "command": "onefilechat.manageCommonConfig",
+        "title": "%commands.manageCommonConfig.title%"
+      },
+      {
+        "command": "onefilechat.viewRawChatJson",
+        "title": "%commands.viewRawChatJson.title%",
+        "category": "One File Chat",
+        "icon": "$(json)",
+        "enablement": "!listMultiSelection"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "onefilechat.sessionsView",
+          "name": "%views.sessionsView.name%",
+          "icon": "media/icon.png",
+          "when": "onefilechat.hasWorkspaceChatResources"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "onefilechat.newChatFile",
+          "when": "view == onefilechat.sessionsView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "onefilechat.refreshSessions",
+          "when": "view == onefilechat.sessionsView",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "onefilechat.renameChatTitle",
+          "when": "view == onefilechat.sessionsView && viewItem == onefilechatSession",
+          "group": "7_modification@1"
+        },
+        {
+          "command": "onefilechat.regenerateChatTitle",
+          "when": "view == onefilechat.sessionsView && viewItem == onefilechatSession",
+          "group": "7_modification@2"
+        },
+        {
+          "command": "onefilechat.deleteChatSession",
+          "when": "view == onefilechat.sessionsView && viewItem == onefilechatSession",
+          "group": "7_modification@3"
+        },
+        {
+          "command": "onefilechat.viewRawChatJson",
+          "when": "view == onefilechat.sessionsView && viewItem == onefilechatSession",
+          "group": "1_navigation@1"
+        }
+      ]
+    },
+    "languages": [
+      {
+        "id": "onefilechat",
+        "aliases": [
+          "One File Chat"
+        ],
+        "extensions": [
+          ".filechat.json"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "onefilechat.chatEditor",
+        "displayName": "%customEditors.chatEditor.displayName%",
+        "selector": [
+          {
+            "filenamePattern": "*.filechat.json"
+          }
+        ],
+        "priority": "default"
+      }
+    ]
+  },
+  "scripts": {
+    "sync:vendor": "node tools/sync-vendor-assets.mjs",
+    "build:extension": "node esbuild.extension.mjs",
+    "build:extension:prod": "node esbuild.extension.mjs --minify",
+    "build:webview": "npm run sync:vendor && node esbuild.webview.mjs",
+    "build:webview:prod": "npm run sync:vendor && node esbuild.webview.mjs --minify",
+    "typecheck:extension": "tsc -p ./ --noEmit",
+    "watch:webview": "npm run sync:vendor && node esbuild.webview.mjs --watch",
+    "typecheck:webview": "tsc -p tsconfig.webview.json",
+    "compile": "npm run build:webview && npm run build:extension && npm run typecheck:extension",
+    "compile:prod": "npm run build:webview:prod && npm run build:extension:prod && npm run typecheck:extension",
+    "watch": "node esbuild.extension.mjs --watch",
+    "vscode:prepublish": "npm run compile:prod",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-typescript": "^7.28.5",
+    "@types/markdown-it": "^14.1.2",
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^20.16.10",
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^3.2.1",
+    "babel-preset-solid": "^1.9.12",
+    "esbuild": "^0.28.0",
+    "esbuild-plugin-babel": "^0.2.3",
+    "solid-js": "^1.9.13",
+    "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.45",
+    "highlight.js": "^11.11.1",
+    "istextorbinary": "^9.5.0",
+    "jsonc-parser": "^3.3.1",
+    "katex": "^0.16.11",
+    "markdown-it": "^14.1.1",
+    "markdown-it-texmath": "^1.0.0",
+    "mime-types": "^3.0.2",
+    "openai": "^4.104.0"
+  },
+  "overrides": {
+    "fast-uri": "^3.1.2"
+  }
+}

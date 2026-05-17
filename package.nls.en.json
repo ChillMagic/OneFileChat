@@ -1,0 +1,13 @@
+{
+  "extension.description": "Store AI conversations as plain .filechat.json files you can version, branch, and review in VS Code.",
+  "commands.newChatFile.title": "One File Chat: New Chat File",
+  "commands.refreshSessions.title": "One File Chat: Refresh Sessions",
+  "commands.renameChatTitle.title": "Rename",
+  "commands.regenerateChatTitle.title": "Regenerate Title",
+  "commands.deleteChatSession.title": "Delete",
+  "commands.manageProviderConfig.title": "One File Chat: Manage Chat Config",
+  "commands.manageCommonConfig.title": "One File Chat: Manage Common Config",
+  "commands.viewRawChatJson.title": "View Raw JSON",
+  "views.sessionsView.name": "One File Chat",
+  "customEditors.chatEditor.displayName": "One File Chat"
+}
