@@ -104,7 +104,7 @@ You can define reusable session presets in `.filechat/common_configs.json`, incl
 
 ### Current Scope
 
-- Built around OpenAI-compatible APIs and LiteLLM Proxy
+- Built around OpenAI-compatible APIs, including compatible gateways such as LiteLLM Proxy
 - Chat file format continues to evolve, with compatibility prioritized for existing data
 - Assistant-generated Markdown images are best-effort persisted as local assets
 
@@ -225,7 +225,7 @@ One File Chat 适合想把 AI 对话当成项目资产来管理的人。
 
 ### 当前范围
 
-- 当前主要围绕 OpenAI-compatible API 和 LiteLLM Proxy
+- 当前主要围绕 OpenAI-compatible API，也支持 LiteLLM Proxy 这类兼容网关
 - 聊天文件格式会继续演进，但优先保证已有数据可读
 - 助手返回的 Markdown 图片会尽量落盘为本地资源
 
