@@ -1,11 +1,11 @@
-import type {
-  ChatAttachment,
-  ChatMessage,
-  ChatMessageBody,
-  ChatMessageVersion,
-  ChatModelSelection,
-  WebviewChatContentPart,
-  WebviewProviderItem
+import {
+  type ChatAttachment,
+  type ChatMessage,
+  type ChatMessageBody,
+  type ChatMessageVersion,
+  type ChatModelSelection,
+  type WebviewChatContentPart,
+  type WebviewProviderItem
 } from '../shared/protocol';
 import { t } from '../shared/i18n';
 import { state } from './store';

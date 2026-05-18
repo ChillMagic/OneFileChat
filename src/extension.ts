@@ -8,24 +8,24 @@ import MarkdownIt from 'markdown-it';
 import { extension as getMimeExtension, lookup as lookupMimeType } from 'mime-types';
 import OpenAI from 'openai';
 import { setLocale, normalizeLocale, t, getLocale } from './shared/i18n';
-import type {
-  ChatAttachment,
-  ChatMessage,
-  ChatMessageBody,
-  ChatMessageBodyPart,
-  ChatMessageStatus,
-  ChatMessageVersion,
-  ChatRole,
-  ChatTokenStats,
-  WebviewChatContentPart,
-  WebviewChatFile,
-  WebviewCommonConfigState,
-  WebviewConfigFieldSource,
-  WebviewConfigFieldState,
-  WebviewIncomingAttachment,
-  WebviewProviderItem,
-  HostToWebviewMessage,
-  WebviewToHostMessage
+import {
+  type ChatAttachment,
+  type ChatMessage,
+  type ChatMessageBody,
+  type ChatMessageBodyPart,
+  type ChatMessageStatus,
+  type ChatMessageVersion,
+  type ChatRole,
+  type ChatTokenStats,
+  type WebviewChatContentPart,
+  type WebviewChatFile,
+  type WebviewCommonConfigState,
+  type WebviewConfigFieldSource,
+  type WebviewConfigFieldState,
+  type WebviewIncomingAttachment,
+  type WebviewProviderItem,
+  type HostToWebviewMessage,
+  type WebviewToHostMessage
 } from './shared/protocol';
 
 const katex = require('katex');
@@ -53,11 +53,6 @@ const TITLE_GENERATION_MAX_CONTEXT_LINE_CHARS = 180;
 const TITLE_GENERATION_SYSTEM_PROMPT = () => t('host.titleGenerationSystemPrompt');
 const SESSIONS_VIEW_VISIBILITY_CONTEXT = 'onefilechat.hasWorkspaceChatResources';
 const KEY_FILE_ENV_VAR_REGEX = /\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g;
-const MAX_ATTACHMENTS_PER_MESSAGE = 12;
-const MAX_IMAGES_PER_MESSAGE = 8;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024;
-const MAX_INLINE_TEXT_ATTACHMENT_BYTES = 1024 * 1024;
 const ASSISTANT_IMAGE_FETCH_TIMEOUT_MS = 15_000;
 const GENERIC_BINARY_MIME_TYPE = 'application/octet-stream';
 const SUPPORTED_IMAGE_MIME_TYPES = new Map<string, string>([
@@ -3716,11 +3711,6 @@ async function fetchAssistantImageAttachment(
       return undefined;
     }
 
-    const contentLength = Number(response.headers.get('content-length'));
-    if (Number.isFinite(contentLength) && contentLength > MAX_IMAGE_BYTES) {
-      return undefined;
-    }
-
     const declaredMimeType = normalizeMimeType(response.headers.get('content-type') ?? undefined);
     const name = createAssistantImageName(label, path.posix.basename(url.pathname), declaredMimeType);
     const mimeType = normalizeAttachmentMimeType(name, declaredMimeType);
@@ -3729,10 +3719,6 @@ async function fetchAssistantImageAttachment(
     }
 
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > MAX_IMAGE_BYTES) {
-      return undefined;
-    }
-
     return persistAttachmentBytes(document, name, mimeType, bytes, 'image');
   } catch {
     return undefined;
@@ -3927,11 +3913,6 @@ function createChatAttachmentFromBytes(
   mimeType: string,
   bytes: Uint8Array
 ): ChatAttachment {
-  const maxBytes = kind === 'image' ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES;
-  if (bytes.byteLength > maxBytes) {
-    throw new Error(t('host.attachmentTooLarge', { mb: Math.floor(maxBytes / (1024 * 1024)), label: assetPath || originalName }));
-  }
-
   if (kind === 'image' && !SUPPORTED_IMAGE_MIME_TYPES.has(mimeType)) {
     throw new Error(t('host.unsupportedImageFormat', { mime: mimeType }));
   }
@@ -3989,17 +3970,6 @@ async function persistWebviewAttachments(
     return [];
   }
 
-  if (attachments.length > MAX_ATTACHMENTS_PER_MESSAGE) {
-    throw new Error(t('host.tooManyAttachmentsPerMessage', { max: MAX_ATTACHMENTS_PER_MESSAGE }));
-  }
-
-  const imageCount = attachments.filter((attachment) => (
-    inferAttachmentKind(attachment.name, attachment.mimeType) === 'image'
-  )).length;
-  if (imageCount > MAX_IMAGES_PER_MESSAGE) {
-    throw new Error(t('host.tooManyImagesPerMessage', { max: MAX_IMAGES_PER_MESSAGE }));
-  }
-
   const assetsDirectoryUri = getChatAssetsDirectoryUri(document);
   await vscode.workspace.fs.createDirectory(assetsDirectoryUri);
 
@@ -4051,11 +4021,6 @@ async function persistAttachmentBytes(
   kind: ChatAttachmentKind = inferAttachmentKind(name, mimeType)
 ): Promise<ChatAttachment> {
   const originalName = normalizeAttachmentOriginalName(name, mimeType, kind);
-  const maxBytes = kind === 'image' ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES;
-  if (bytes.byteLength > maxBytes) {
-    throw new Error(t('host.attachmentTooLarge', { mb: Math.floor(maxBytes / (1024 * 1024)), label: originalName }));
-  }
-
   if (kind === 'image' && !SUPPORTED_IMAGE_MIME_TYPES.has(mimeType)) {
     throw new Error(t('host.unsupportedImageFormat', { mime: mimeType }));
   }
@@ -4109,15 +4074,6 @@ async function validateMessageAttachmentReferences(document: vscode.TextDocument
     throw new Error(t('host.attachmentReferenceMissing', { id: missingId }));
   }
 
-  if (referencedAttachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
-    throw new Error(t('host.tooManyAttachmentsPerMessage', { max: MAX_ATTACHMENTS_PER_MESSAGE }));
-  }
-
-  const imageCount = referencedAttachmentIds.filter((attachmentId) => attachmentById.get(attachmentId)?.kind === 'image').length;
-  if (imageCount > MAX_IMAGES_PER_MESSAGE) {
-    throw new Error(t('host.tooManyImagesPerMessage', { max: MAX_IMAGES_PER_MESSAGE }));
-  }
-
   for (const attachmentId of referencedAttachmentIds) {
     const attachment = attachmentById.get(attachmentId);
     if (!attachment) {
@@ -4126,11 +4082,7 @@ async function validateMessageAttachmentReferences(document: vscode.TextDocument
 
     const assetPath = normalizeStoredAssetPath(attachment.assetPath);
     const assetUri = await resolveAssetFileUri(document, assetPath);
-    const assetStat = await vscode.workspace.fs.stat(assetUri);
-    const maxBytes = attachment.kind === 'image' ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES;
-    if (assetStat.size > maxBytes) {
-      throw new Error(t('host.attachmentTooLarge', { mb: Math.floor(maxBytes / (1024 * 1024)), label: assetPath }));
-    }
+    await vscode.workspace.fs.stat(assetUri);
 
     if (attachment.kind === 'image') {
       getImageMimeTypeForPath(assetPath);
@@ -6714,11 +6666,6 @@ async function createModelMessageContent(
       throw new Error(t('host.attachmentResourceNotFound', { path: relativePath }));
     }
 
-    const maxBytes = attachment.kind === 'image' ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES;
-    if (bytes.byteLength > maxBytes) {
-      throw new Error(t('host.attachmentTooLarge', { mb: Math.floor(maxBytes / (1024 * 1024)), label: relativePath }));
-    }
-
     if (attachment.kind === 'image') {
       contentParts.push({
         type: 'image_url',
@@ -6746,12 +6693,7 @@ async function createModelTextForFileAttachment(attachment: ChatAttachment, byte
     return t('host.attachmentBinaryNote', { header });
   }
 
-  if (bytes.byteLength > MAX_INLINE_TEXT_ATTACHMENT_BYTES) {
-    return t('host.attachmentTextTooLargeNote', { header, limit: formatBytes(MAX_INLINE_TEXT_ATTACHMENT_BYTES) });
-  }
-
-  const text = toBuffer(bytes).toString('utf8');
-  return t('host.attachmentTextInline', { header, text });
+  return t('host.attachmentTextMetadataNote', { header });
 }
 
 function getMessagesForModel(messages: ChatMessage[]): ChatMessage[] {

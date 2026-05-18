@@ -302,10 +302,7 @@ const messages: MessageDict = {
     attachmentDataNotDataUrl: 'Attachment data is not a valid data URL.',
     attachmentDataMustBeBase64: 'Attachment data must be base64-encoded.',
     attachmentContentEmpty: 'Attachment content is empty.',
-    attachmentTooLarge: 'Attachment cannot exceed {mb}MB: {label}',
     unsupportedImageFormat: 'Unsupported image format: {mime}',
-    tooManyAttachmentsPerMessage: 'A single message can have at most {max} attachments.',
-    tooManyImagesPerMessage: 'A single message can have at most {max} images.',
     attachmentMimeMismatch: 'Attachment MIME mismatch: {name}',
     attachmentSizeMismatch: 'Attachment size mismatch: {name}',
     unnamedAttachment: 'unnamed attachment',
@@ -353,10 +350,8 @@ const messages: MessageDict = {
     optionConfigReservedFields: 'option.config contains reserved fields: {fields}. Remove them.',
     attachmentBinaryNote:
       '{header}\nNote: this is a binary file; the request only includes metadata, not the file body.',
-    attachmentTextTooLargeNote:
-      '{header}\nNote: the text file exceeds {limit}; the request only includes metadata, not the inline contents.',
-    attachmentTextInline:
-      '{header}\n\nFile contents start:\n{text}\nFile contents end.',
+    attachmentTextMetadataNote:
+      '{header}\nNote: this is a text file; the request only includes metadata, not the inline contents.',
     attachmentHeader: 'Attachment file: {name}\nMIME: {mime}\nSize: {size}',
     parentNodeForNewMessageMissing: 'Could not find the parent node to attach the new message to.',
     chatMessageToUpdateMissing: 'Could not find the chat message to update.',

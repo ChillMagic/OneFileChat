@@ -1877,7 +1877,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: min(240px, 32vh);
   margin: 0 0 4px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .image-preview-item {

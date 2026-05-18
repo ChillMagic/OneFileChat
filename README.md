@@ -94,9 +94,8 @@ Notes:
 
 - Attachments are stored under `.filechat/assets/` next to the chat file
 - Supported image types: `png`, `jpg`, `jpeg`, `webp`, `gif`
-- Maximum image size: 8 MB each
-- Maximum attachments per message: 12 total, including up to 8 images
-- Maximum non-image attachment size: 16 MB each
+- There is no fixed per-message attachment count limit; practical limits depend on the selected model, provider API, and runtime environment
+- Non-image attachments are sent as file metadata by default instead of inlining the full file body into the prompt
 
 ### Common Configs
 
@@ -215,9 +214,8 @@ One File Chat 适合想把 AI 对话当成项目资产来管理的人。
 
 - 附件会保存在聊天文件同目录下的 `.filechat/assets/`
 - 支持的图片类型：`png`、`jpg`、`jpeg`、`webp`、`gif`
-- 单张图片最大 8 MB
-- 单条消息最多 12 个附件，其中图片最多 8 张
-- 非图片附件单个最大 16 MB
+- 单条消息的附件数量不设固定上限，实际可用范围取决于所选模型、提供方接口与运行环境
+- 非图片附件默认只向模型发送文件元信息，不会把整份文件正文直接内联进 prompt
 
 ### 通用配置
 
