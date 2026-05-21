@@ -7,6 +7,7 @@ import { parse as parseJsonc, ParseError, printParseErrorCode } from 'jsonc-pars
 import MarkdownIt from 'markdown-it';
 import { extension as getMimeExtension, lookup as lookupMimeType } from 'mime-types';
 import OpenAI from 'openai';
+import { applyLegacyChatCompatibility } from './chatCompat';
 import { setLocale, normalizeLocale, t, getLocale } from './shared/i18n';
 import {
   type ChatAttachment,
@@ -2190,7 +2191,7 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
       const chat = parseChatDocument(document.getText(), trimChatFileSuffix(path.basename(document.uri.fsPath)));
       const keyConfig = await loadKeyConfig(document);
       const config = this.resolveRequestConfig(document, chat, keyConfig);
-      const assistantName = resolveAssistantName(config);
+      const assistantLabel = resolveAssistantName(config);
       const assistantMetadata = resolveAssistantMessageMetadata(config);
       const activeMessages = getActiveConversationMessages(chat);
       const parentMessage = activeMessages[activeMessages.length - 1];
@@ -2208,7 +2209,7 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
       await validateConversationAttachmentReferences(document, [...activeMessages, userMessage]);
 
       const assistantMessage = createMessage('assistant', '', {
-        name: assistantName,
+        assistantLabel,
         model: assistantMetadata.model,
         providerId: assistantMetadata.providerId,
         optionId: assistantMetadata.optionId,
@@ -2261,7 +2262,7 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
       const chat = parseChatDocument(document.getText(), trimChatFileSuffix(path.basename(document.uri.fsPath)));
       const keyConfig = await loadKeyConfig(document);
       const config = this.resolveRequestConfig(document, chat, keyConfig);
-      const assistantName = resolveAssistantName(config);
+      const assistantLabel = resolveAssistantName(config);
       const assistantMetadata = resolveAssistantMessageMetadata(config);
       const targetMessage = chat.messages.find((message) => message.id === assistantMessageId);
 
@@ -2277,7 +2278,7 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
       await validateConversationAttachmentReferences(document, futureConversation);
 
       const assistantMessage = createMessage('assistant', '', {
-        name: assistantName,
+        assistantLabel,
         model: assistantMetadata.model,
         providerId: assistantMetadata.providerId,
         optionId: assistantMetadata.optionId,
@@ -2336,7 +2337,7 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
       const chat = parseChatDocument(document.getText(), trimChatFileSuffix(path.basename(document.uri.fsPath)));
       const keyConfig = await loadKeyConfig(document);
       const config = this.resolveRequestConfig(document, chat, keyConfig);
-      const assistantName = resolveAssistantName(config);
+      const assistantLabel = resolveAssistantName(config);
       const assistantMetadata = resolveAssistantMessageMetadata(config);
       const targetMessage = chat.messages.find((message) => message.id === messageId);
 
@@ -2372,7 +2373,7 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
       await validateConversationAttachmentReferences(document, futureConversation);
 
       const assistantMessage = createMessage('assistant', '', {
-        name: assistantName,
+        assistantLabel,
         model: assistantMetadata.model,
         providerId: assistantMetadata.providerId,
         optionId: assistantMetadata.optionId,
@@ -2742,14 +2743,14 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<void> {
     const keyConfig = await loadKeyConfig(document);
     const config = this.resolveRequestConfig(document, chat, keyConfig);
-    const assistantName = resolveAssistantName(config);
+    const assistantLabel = resolveAssistantName(config);
     const assistantMetadata = resolveAssistantMessageMetadata(config);
 
     const futureConversation = getConversationPathToMessage(chat, userMessageId);
     await validateConversationAttachmentReferences(document, futureConversation);
 
     const assistantMessage = createMessage('assistant', '', {
-      name: assistantName,
+      assistantLabel,
       model: assistantMetadata.model,
       providerId: assistantMetadata.providerId,
       optionId: assistantMetadata.optionId,
@@ -3148,27 +3149,30 @@ async function createWebviewChatMessage(
   const currentContent = getMessageCurrentContent(message);
   const currentBody = getMessageCurrentBody(message);
   const currentAttachments = getMessageCurrentAttachments(message);
-  const assistantName = keyConfig
-    ? resolveProjectedAssistantMessageName(message, keyConfig)
-    : message.name;
 
   const [contentHtml, contentParts, reasoningContentHtml, versions] = await Promise.all([
     renderMarkdownToHtml(currentContent),
     createWebviewContentParts(webview, document, currentBody, currentAttachments),
     renderMarkdownToHtml(message.reasoningContent),
     Promise.all(
-      (message.versions ?? []).map(async (version) => ({
-        ...version,
-        contentHtml: await renderMarkdownToHtml(version.content),
-        contentParts: await createWebviewContentParts(webview, document, version.body, version.attachments ?? []),
-        reasoningContentHtml: await renderMarkdownToHtml(version.reasoningContent)
-      }))
+      (message.versions ?? []).map(async (version) => {
+        const assistantLabel = keyConfig
+          ? resolveProjectedAssistantLabel(version, keyConfig)
+          : version.assistantLabel;
+
+        return {
+          ...version,
+          ...(assistantLabel !== undefined ? { assistantLabel } : {}),
+          contentHtml: await renderMarkdownToHtml(version.content),
+          contentParts: await createWebviewContentParts(webview, document, version.body, version.attachments ?? []),
+          reasoningContentHtml: await renderMarkdownToHtml(version.reasoningContent)
+        };
+      })
     )
   ]);
 
   return {
     ...message,
-    ...(assistantName !== undefined ? { name: assistantName } : {}),
     contentHtml,
     contentParts,
     reasoningContentHtml,
@@ -4115,34 +4119,36 @@ function parseChatDocument(text: string, fallbackTitle: string): ChatFile {
     throw new Error(t('host.chatFileRootMustBeObject'));
   }
 
-  if (raw.version !== CHAT_FILE_VERSION) {
+  const compatibleRaw = applyLegacyChatCompatibility(raw);
+
+  if (compatibleRaw.version !== CHAT_FILE_VERSION) {
     throw new Error(t('host.chatFileVersionMustBe', { version: CHAT_FILE_VERSION }));
   }
 
-  if (!Array.isArray(raw.messages)) {
+  if (!Array.isArray(compatibleRaw.messages)) {
     throw new Error(t('host.chatFileMessagesMustBeArray'));
   }
 
-  const parsedMessages = raw.messages
+  const parsedMessages = compatibleRaw.messages
     .map((value) => normalizeMessage(value))
     .filter((value): value is ChatMessage => value !== undefined);
 
-  const normalizedTree = normalizeChatTree(raw, parsedMessages);
-  const createdAt = normalizeTimestamp(raw.createdAt) ?? new Date().toISOString();
-  const updatedAt = normalizeTimestamp(raw.updatedAt) ?? createdAt;
+  const normalizedTree = normalizeChatTree(compatibleRaw as Record<string, any>, parsedMessages);
+  const createdAt = normalizeTimestamp(compatibleRaw.createdAt) ?? new Date().toISOString();
+  const updatedAt = normalizeTimestamp(compatibleRaw.updatedAt) ?? createdAt;
 
   return {
     version: CHAT_FILE_VERSION,
-    title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : fallbackTitle,
+    title: typeof compatibleRaw.title === 'string' && compatibleRaw.title.trim() ? compatibleRaw.title.trim() : fallbackTitle,
     createdAt,
     updatedAt,
     rootMessageIds: normalizedTree.rootMessageIds,
     activeChildByParentId: normalizedTree.activeChildByParentId,
     messages: normalizedTree.messages,
-    commonConfigId: normalizeOptionalStringOrNull(raw.commonConfigId),
-    systemPrompt: normalizeInheritableTextField(raw.systemPrompt),
-    messageTemplate: normalizeInheritableTextField(raw.messageTemplate),
-    modelSelection: normalizeModelSelectionField(raw.modelSelection)
+    commonConfigId: normalizeOptionalStringOrNull(compatibleRaw.commonConfigId),
+    systemPrompt: normalizeInheritableTextField(compatibleRaw.systemPrompt),
+    messageTemplate: normalizeInheritableTextField(compatibleRaw.messageTemplate),
+    modelSelection: normalizeModelSelectionField(compatibleRaw.modelSelection)
   };
 }
 
@@ -4179,6 +4185,10 @@ function normalizeMessage(raw: unknown): ChatMessage | undefined {
     ? raw.optionId.trim()
     : undefined;
 
+  const rawAssistantLabel = typeof raw.assistantLabel === 'string' && raw.assistantLabel.trim()
+    ? raw.assistantLabel.trim()
+    : undefined;
+
   const versions = normalizeMessageVersions(raw.versions, createdAt, status, {
     reasoningContent: rawReasoningContent,
     thinkingDurationMs: rawThinkingDurationMs,
@@ -4186,7 +4196,8 @@ function normalizeMessage(raw: unknown): ChatMessage | undefined {
     tokenStats: rawTokenStats,
     model: rawModel,
     providerId: rawProviderId,
-    optionId: rawOptionId
+    optionId: rawOptionId,
+    assistantLabel: rawAssistantLabel
   });
 
   const currentVersionId = normalizeCurrentVersionId(raw.currentVersionId, versions);
@@ -4213,7 +4224,6 @@ function normalizeMessage(raw: unknown): ChatMessage | undefined {
     model: currentVersion?.model ?? rawModel,
     providerId: currentVersion?.providerId ?? rawProviderId,
     optionId: currentVersion?.optionId ?? rawOptionId,
-    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : undefined,
     reasoningContent: currentVersion?.reasoningContent ?? rawReasoningContent,
     thinkingDurationMs: currentVersion?.thinkingDurationMs ?? rawThinkingDurationMs,
     totalDurationMs: currentVersion?.totalDurationMs ?? rawTotalDurationMs,
@@ -4445,6 +4455,7 @@ function normalizeMessageVersions(
     model?: string;
     providerId?: string;
     optionId?: string;
+    assistantLabel?: string;
   }
 ): ChatMessageVersion[] | undefined {
   if (!Array.isArray(raw)) {
@@ -4497,6 +4508,10 @@ function normalizeMessageVersions(
       ? value.optionId.trim()
       : undefined;
 
+    const assistantLabel = typeof value.assistantLabel === 'string' && value.assistantLabel.trim()
+      ? value.assistantLabel.trim()
+      : fallbackExtras?.assistantLabel;
+
     const version: ChatMessageVersion = {
       id,
       content: normalizedContent,
@@ -4509,7 +4524,8 @@ function normalizeMessageVersions(
       ...(tokenStats !== undefined ? { tokenStats } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(providerId !== undefined ? { providerId } : {}),
-      ...(optionId !== undefined ? { optionId } : {})
+      ...(optionId !== undefined ? { optionId } : {}),
+      ...(assistantLabel !== undefined ? { assistantLabel } : {})
     };
 
     versions.push(version);
@@ -4632,6 +4648,12 @@ function getMessageCurrentAttachments(
   return getMessageCurrentVersion(message)?.attachments ?? message.attachments ?? [];
 }
 
+function getMessageCurrentAssistantLabel(
+  message: Pick<ChatMessage, 'versions' | 'currentVersionId'>
+): string | undefined {
+  return getMessageCurrentVersion(message)?.assistantLabel;
+}
+
 function isCurrentMessageContent(
   message: Pick<ChatMessage, 'content' | 'versions' | 'currentVersionId'>,
   content: string
@@ -4683,6 +4705,7 @@ function createMessageVersion(
     model?: string;
     providerId?: string;
     optionId?: string;
+    assistantLabel?: string;
   },
   body: ChatMessageBody = createTextMessageBody(content),
   attachments?: ChatAttachment[]
@@ -4700,7 +4723,8 @@ function createMessageVersion(
     ...(extras?.tokenStats !== undefined ? { tokenStats: extras.tokenStats } : {}),
     ...(extras?.model !== undefined ? { model: extras.model } : {}),
     ...(extras?.providerId !== undefined ? { providerId: extras.providerId } : {}),
-    ...(extras?.optionId !== undefined ? { optionId: extras.optionId } : {})
+    ...(extras?.optionId !== undefined ? { optionId: extras.optionId } : {}),
+    ...(extras?.assistantLabel !== undefined ? { assistantLabel: extras.assistantLabel } : {})
   };
 }
 
@@ -4721,7 +4745,8 @@ function appendMessageVersion(
       tokenStats: message.tokenStats,
       model: message.model,
       providerId: message.providerId,
-      optionId: message.optionId
+      optionId: message.optionId,
+      assistantLabel: getMessageCurrentAssistantLabel(message)
     },
     body ?? createTextMessageBody(content),
     attachments
@@ -4771,6 +4796,7 @@ function setMessageCurrentContent(
     model?: string;
     providerId?: string;
     optionId?: string;
+    assistantLabel?: string;
   }
 ): ChatMessage {
   const versions = [...(message.versions ?? [])];
@@ -4803,7 +4829,8 @@ function setMessageCurrentContent(
     ...(versionExtras?.tokenStats !== undefined ? { tokenStats: versionExtras.tokenStats } : {}),
     ...(versionExtras?.model !== undefined ? { model: versionExtras.model } : {}),
     ...(versionExtras?.providerId !== undefined ? { providerId: versionExtras.providerId } : {}),
-    ...(versionExtras?.optionId !== undefined ? { optionId: versionExtras.optionId } : {})
+    ...(versionExtras?.optionId !== undefined ? { optionId: versionExtras.optionId } : {}),
+    ...(versionExtras?.assistantLabel !== undefined ? { assistantLabel: versionExtras.assistantLabel } : {})
   };
 
   return {
@@ -4830,6 +4857,7 @@ function setMessageCurrentStructuredContent(
     model?: string;
     providerId?: string;
     optionId?: string;
+    assistantLabel?: string;
   }
 ): ChatMessage {
   const versions = [...(message.versions ?? [])];
@@ -4863,7 +4891,8 @@ function setMessageCurrentStructuredContent(
     ...(versionExtras?.tokenStats !== undefined ? { tokenStats: versionExtras.tokenStats } : {}),
     ...(versionExtras?.model !== undefined ? { model: versionExtras.model } : {}),
     ...(versionExtras?.providerId !== undefined ? { providerId: versionExtras.providerId } : {}),
-    ...(versionExtras?.optionId !== undefined ? { optionId: versionExtras.optionId } : {})
+    ...(versionExtras?.optionId !== undefined ? { optionId: versionExtras.optionId } : {}),
+    ...(versionExtras?.assistantLabel !== undefined ? { assistantLabel: versionExtras.assistantLabel } : {})
   };
 
   return {
@@ -4975,7 +5004,8 @@ function createPersistedMessageVersion(
     ...(message.tokenStats !== undefined ? { tokenStats: message.tokenStats } : {}),
     ...(message.model !== undefined ? { model: message.model } : {}),
     ...(message.providerId !== undefined ? { providerId: message.providerId } : {}),
-    ...(message.optionId !== undefined ? { optionId: message.optionId } : {})
+    ...(message.optionId !== undefined ? { optionId: message.optionId } : {}),
+    ...(getMessageCurrentAssistantLabel(message) !== undefined ? { assistantLabel: getMessageCurrentAssistantLabel(message) } : {})
   };
 }
 
@@ -5090,7 +5120,7 @@ function createMessage(
     model?: string;
     providerId?: string;
     optionId?: string;
-    name?: string;
+    assistantLabel?: string;
     reasoningContent?: string;
     thinkingDurationMs?: number;
     totalDurationMs?: number;
@@ -5113,7 +5143,8 @@ function createMessage(
         tokenStats: options.tokenStats,
         model: options.model,
         providerId: options.providerId,
-        optionId: options.optionId
+        optionId: options.optionId,
+        assistantLabel: options.assistantLabel
       }, body, attachments);
 
   return {
@@ -5127,7 +5158,6 @@ function createMessage(
     model: options.model,
     providerId: options.providerId,
     optionId: options.optionId,
-    name: options.name,
     reasoningContent: options.reasoningContent,
     thinkingDurationMs: options.thinkingDurationMs,
     totalDurationMs: options.totalDurationMs,
@@ -5140,7 +5170,6 @@ function createMessage(
 async function replaceDocumentContent(document: vscode.TextDocument, nextContent: string): Promise<void> {
   const edit = new vscode.WorkspaceEdit();
   const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
-
   edit.replace(document.uri, fullRange, nextContent);
 
   const applied = await vscode.workspace.applyEdit(edit);
@@ -6417,8 +6446,9 @@ function resolveLatestAssistantDisplayName(chat: ChatFile): string | undefined {
       continue;
     }
 
-    if (typeof message.name === 'string' && message.name.trim()) {
-      return message.name.trim();
+    const assistantLabel = getMessageCurrentAssistantLabel(message);
+    if (typeof assistantLabel === 'string' && assistantLabel.trim()) {
+      return assistantLabel.trim();
     }
 
     if (typeof message.model === 'string' && message.model.trim()) {
@@ -6429,9 +6459,12 @@ function resolveLatestAssistantDisplayName(chat: ChatFile): string | undefined {
   return undefined;
 }
 
-function resolveProjectedAssistantMessageName(message: ChatMessage, keyConfig: KeyFileConfig): string | undefined {
-  if (message.role !== 'assistant' || !message.providerId || !message.model) {
-    return message.name;
+function resolveProjectedAssistantLabel(
+  message: Pick<ChatMessageVersion, 'assistantLabel' | 'providerId' | 'model' | 'optionId'>,
+  keyConfig: KeyFileConfig
+): string | undefined {
+  if (!message.providerId || !message.model) {
+    return message.assistantLabel;
   }
 
   return tryResolveAssistantNameFromSelection(
@@ -6441,7 +6474,7 @@ function resolveProjectedAssistantMessageName(message: ChatMessage, keyConfig: K
       optionId: message.optionId
     },
     keyConfig
-  ) ?? message.name;
+  ) ?? message.assistantLabel;
 }
 
 function resolveAssistantMessageMetadata(config: ResolvedModelConfig): { model: string; providerId: string; optionId?: string } {

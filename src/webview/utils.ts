@@ -217,8 +217,9 @@ export function getMessagePreviewSummary(m: ChatMessage): string {
 export function getRoleLabel(m: ChatMessage): string {
   if (m.role === 'user') return t('messages.roleUser');
   if (m.role === 'assistant') {
+    const displayedVersion = getDisplayedVersion(m);
     return (
-      (typeof m.name === 'string' && m.name.trim()) ||
+      (typeof displayedVersion?.assistantLabel === 'string' && displayedVersion.assistantLabel.trim()) ||
       (typeof m.model === 'string' && m.model.trim()) ||
       t('messages.roleAssistant')
     );

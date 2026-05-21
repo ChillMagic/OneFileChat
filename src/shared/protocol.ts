@@ -48,6 +48,7 @@ export interface ChatMessageVersion {
   model?: string;
   providerId?: string;
   optionId?: string;
+  assistantLabel?: string;
   // Webview-projected:
   contentHtml?: string;
   contentParts?: WebviewChatContentPart[];
@@ -68,7 +69,6 @@ export interface ChatMessage {
   model?: string;
   providerId?: string;
   optionId?: string;
-  name?: string;
   reasoningContent?: string;
   thinkingDurationMs?: number;
   totalDurationMs?: number;
