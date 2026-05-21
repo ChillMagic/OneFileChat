@@ -8,6 +8,7 @@ import MarkdownIt from 'markdown-it';
 import { extension as getMimeExtension, lookup as lookupMimeType } from 'mime-types';
 import OpenAI from 'openai';
 import { applyLegacyChatCompatibility } from './chatCompat';
+import { createModelTextForParsedFileAttachment } from './parsers/files';
 import { setLocale, normalizeLocale, t, getLocale } from './shared/i18n';
 import {
   type ChatAttachment,
@@ -4130,8 +4131,8 @@ function parseChatDocument(text: string, fallbackTitle: string): ChatFile {
   }
 
   const parsedMessages = compatibleRaw.messages
-    .map((value) => normalizeMessage(value))
-    .filter((value): value is ChatMessage => value !== undefined);
+    .map((value: unknown) => normalizeMessage(value))
+    .filter((value: unknown): value is ChatMessage => value !== undefined);
 
   const normalizedTree = normalizeChatTree(compatibleRaw as Record<string, any>, parsedMessages);
   const createdAt = normalizeTimestamp(compatibleRaw.createdAt) ?? new Date().toISOString();
@@ -6720,13 +6721,14 @@ async function createModelMessageContent(
 }
 
 async function createModelTextForFileAttachment(attachment: ChatAttachment, bytes: Uint8Array): Promise<string> {
-  const header = t('host.attachmentHeader', { name: attachment.originalName, mime: attachment.mimeType, size: formatBytes(bytes.byteLength) });
-
-  if (!await isTextualAttachment(attachment, bytes)) {
-    return t('host.attachmentBinaryNote', { header });
-  }
-
-  return t('host.attachmentTextMetadataNote', { header });
+  return createModelTextForParsedFileAttachment({
+    attachment,
+    bytes,
+    formatBytes,
+    isTextualAttachment,
+    decodeUtf8,
+    t
+  });
 }
 
 function getMessagesForModel(messages: ChatMessage[]): ChatMessage[] {

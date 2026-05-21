@@ -350,8 +350,8 @@ const messages: MessageDict = {
     optionConfigReservedFields: 'option.config contains reserved fields: {fields}. Remove them.',
     attachmentBinaryNote:
       '{header}\nNote: this is a binary file; the request only includes metadata, not the file body.',
-    attachmentTextMetadataNote:
-      '{header}\nNote: this is a text file; the request only includes metadata, not the inline contents.',
+    attachmentTextInlineNote:
+      '{header}\nNote: this is a text file; the request includes inline file contents below.',
     attachmentHeader: 'Attachment file: {name}\nMIME: {mime}\nSize: {size}',
     parentNodeForNewMessageMissing: 'Could not find the parent node to attach the new message to.',
     chatMessageToUpdateMissing: 'Could not find the chat message to update.',

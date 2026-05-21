@@ -332,7 +332,7 @@ const messages = {
     selectedModelNotFound: '当前选择的模型不存在，请重新选择。',
     optionConfigReservedFields: 'option.config 里包含保留字段：{fields}。请删除这些字段。',
     attachmentBinaryNote: '{header}\n说明：这是一个二进制文件，当前请求只发送文件元数据，未发送文件正文。',
-    attachmentTextMetadataNote: '{header}\n说明：这是一个文本文件，当前请求只发送文件元数据，未内联全文。',
+    attachmentTextInlineNote: '{header}\n说明：这是一个文本文件，当前请求会在下方内联文件正文。',
     attachmentHeader: '附件文件：{name}\nMIME：{mime}\n大小：{size}',
     parentNodeForNewMessageMissing: '未找到要挂接新消息的父节点。',
     chatMessageToUpdateMissing: '未找到要更新的聊天消息。',
