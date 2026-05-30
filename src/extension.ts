@@ -1579,6 +1579,8 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
     let flushTimer: ReturnType<typeof setTimeout> | undefined;
     let pendingChunk: StreamSnapshot | undefined;
     let latestSnapshot: StreamSnapshot | undefined;
+    let streamAccumulationWarned = false;
+    const STREAM_ACCUMULATION_SOFT_LIMIT_CHARS = 200 * 1024 * 1024;
 
     const flushChunkToWebview = (): void => {
       if (flushTimer !== undefined) {
@@ -1628,6 +1630,12 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
       const snapshot = { messageId, content, reasoningContent };
       latestSnapshot = snapshot;
       pendingChunk = snapshot;
+
+      if (!streamAccumulationWarned && content.length + reasoningContent.length >= STREAM_ACCUMULATION_SOFT_LIMIT_CHARS) {
+        streamAccumulationWarned = true;
+        console.warn(`[onefilechat] Streaming response for message ${messageId} exceeded the soft size limit (${STREAM_ACCUMULATION_SOFT_LIMIT_CHARS} chars); memory usage may be high.`);
+        void vscode.window.showWarningMessage(t('host.streamResponseTooLarge'));
+      }
 
       if (flushTimer === undefined) {
         flushTimer = setTimeout(flushChunkToWebview, 80);
