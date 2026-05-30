@@ -1657,7 +1657,10 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
 
     const changeSubscription = vscode.workspace.onDidChangeTextDocument((event) => {
       if (event.document.uri.toString() === document.uri.toString()) {
-        void postState();
+        // Drain any in-flight stream chunk renders first so the full-document
+        // refresh can never race ahead of a pending streamChunk message and
+        // momentarily render a stale view.
+        void postChunkQueue.then(() => postState());
       }
     });
 
