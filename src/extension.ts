@@ -2923,7 +2923,8 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
             return {
               ...message,
               reasoningContent: undefined,
-              status: 'error'
+              status: 'error',
+              errorDetail: toErrorMessage(error)
             };
           }
 
@@ -2939,6 +2940,9 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
           };
         });
         await replaceDocumentContent(document, serializeChatFile(nextChat));
+        // The error is surfaced inside the assistant message bubble (and persisted to
+        // the chat file), so we deliberately do not rethrow to avoid a duplicate popup.
+        return;
       }
 
       throw error;
@@ -4261,6 +4265,7 @@ function normalizeMessage(raw: unknown): ChatMessage | undefined {
     totalDurationMs: currentVersion?.totalDurationMs ?? rawTotalDurationMs,
     tokenStats: currentVersion?.tokenStats ?? rawTokenStats,
     status,
+    errorDetail: typeof raw.errorDetail === 'string' && raw.errorDetail.trim() ? raw.errorDetail : undefined,
     versions
   };
 }
@@ -5109,6 +5114,7 @@ function createPersistedChatMessage(message: ChatMessage): PersistedChatMessage 
     providerId: _providerId,
     optionId: _optionId,
     status,
+    errorDetail,
     ...persistedMessage
   } = message;
 
@@ -5116,6 +5122,7 @@ function createPersistedChatMessage(message: ChatMessage): PersistedChatMessage 
     ...persistedMessage,
     ...(currentVersionId ? { currentVersionId } : {}),
     ...(status && status !== 'completed' ? { status } : {}),
+    ...(status === 'error' && errorDetail ? { errorDetail } : {}),
     versions
   };
 }

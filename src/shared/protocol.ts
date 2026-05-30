@@ -74,6 +74,7 @@ export interface ChatMessage {
   totalDurationMs?: number;
   tokenStats?: ChatTokenStats;
   status?: ChatMessageStatus;
+  errorDetail?: string;
   // Webview-projected:
   contentHtml?: string;
   contentParts?: WebviewChatContentPart[];

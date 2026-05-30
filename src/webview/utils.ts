@@ -103,7 +103,7 @@ export function getVisibleContent(m: ChatMessage, version: ChatMessageVersion | 
   if (cc.trim()) return cc;
   if (m.role === 'assistant' && m.status === 'pending') return t('messages.pendingFallback');
   if (m.role === 'assistant' && m.status === 'canceled') return t('messages.canceledFallback');
-  if (m.role === 'assistant' && m.status === 'error') return t('messages.errorFallback');
+  if (m.role === 'assistant' && m.status === 'error') return m.errorDetail?.trim() || t('messages.errorFallback');
   return '';
 }
 
