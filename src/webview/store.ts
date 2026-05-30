@@ -70,6 +70,9 @@ export interface AppState {
   largeEditor: { mode: 'composer' | 'edit-correct' | 'edit-rewrite'; value: string } | null;
   largeEditorSeedNonce: number;
   composerExternalValue: { value: string; nonce: number } | null;
+  composerDraft: string;
+  composerHistoryEntries: string[];
+  composerHistoryIndex: number;
 }
 
 function emptyConfigField(): WebviewConfigFieldState {
@@ -88,6 +91,32 @@ function emptyCommonConfig(): WebviewCommonConfigState {
 }
 function emptyDraft(): ConfigDraft {
   return { inherit: false, content: '', dirty: false };
+}
+
+const COMPOSER_HISTORY_LIMIT = 200;
+
+function pushComposerHistory(s: AppState, value: string) {
+  const currentValue = s.composerHistoryEntries[s.composerHistoryIndex] ?? '';
+  if (currentValue === value) {
+    return;
+  }
+
+  let entries = s.composerHistoryEntries.slice(0, s.composerHistoryIndex + 1);
+  entries.push(value);
+
+  if (entries.length > COMPOSER_HISTORY_LIMIT) {
+    entries = entries.slice(entries.length - COMPOSER_HISTORY_LIMIT);
+  }
+
+  s.composerHistoryEntries = entries;
+  s.composerHistoryIndex = entries.length - 1;
+}
+
+function setComposerDraftState(s: AppState, value: string, recordHistory = true) {
+  s.composerDraft = value;
+  if (recordHistory) {
+    pushComposerHistory(s, value);
+  }
 }
 
 const initial: AppState = {
@@ -122,7 +151,10 @@ const initial: AppState = {
   isCopyingImagePreview: false,
   largeEditor: null,
   largeEditorSeedNonce: 0,
-  composerExternalValue: null
+  composerExternalValue: null,
+  composerDraft: '',
+  composerHistoryEntries: [''],
+  composerHistoryIndex: 0
 };
 
 export const [state, setState] = createStore<AppState>(initial);
@@ -420,23 +452,85 @@ export const actions = {
   setLargeEditorValue(v: string) {
     setState(
       produce((s) => {
-        if (s.largeEditor) s.largeEditor.value = v;
+        if (!s.largeEditor) return;
+        s.largeEditor.value = v;
+        if (s.largeEditor.mode === 'composer') {
+          setComposerDraftState(s, v);
+        }
       })
     );
   },
   closeLargeEditor() {
-    setState('largeEditor', null);
+    setState(
+      produce((s) => {
+        // Keep whatever the user typed in composer mode so closing the overlay
+        // (Esc / click-away / Cancel) never silently discards their draft.
+        if (s.largeEditor?.mode === 'composer') {
+          setComposerDraftState(s, s.largeEditor.value, false);
+          s.composerExternalValue = { value: s.largeEditor.value, nonce: Date.now() };
+        }
+        s.largeEditor = null;
+      })
+    );
   },
   clearComposerExternalValue() {
     setState('composerExternalValue', null);
+  },
+  syncComposerDraft(value: string) {
+    setState(
+      produce((s) => {
+        setComposerDraftState(s, value);
+      })
+    );
+  },
+  resetComposerDraft(value = '') {
+    setState(
+      produce((s) => {
+        s.composerDraft = value;
+        s.composerHistoryEntries = [value];
+        s.composerHistoryIndex = 0;
+      })
+    );
+  },
+  stepComposerHistory(direction: 'undo' | 'redo') {
+    let didStep = false;
+
+    setState(
+      produce((s) => {
+        const nextIndex = direction === 'undo' ? s.composerHistoryIndex - 1 : s.composerHistoryIndex + 1;
+        if (nextIndex < 0 || nextIndex >= s.composerHistoryEntries.length) {
+          return;
+        }
+
+        const value = s.composerHistoryEntries[nextIndex] ?? '';
+        s.composerHistoryIndex = nextIndex;
+        s.composerDraft = value;
+
+        if (s.largeEditor?.mode === 'composer') {
+          s.largeEditor.value = value;
+          s.largeEditorSeedNonce += 1;
+        } else {
+          s.composerExternalValue = { value, nonce: Date.now() };
+        }
+
+        didStep = true;
+      })
+    );
+
+    return didStep;
   },
   async applyLargeEditor(continueGeneration?: boolean) {
     const le = state.largeEditor;
     if (!le) return;
     const value = le.value;
     if (le.mode === 'composer') {
-      setState('composerExternalValue', { value, nonce: Date.now() });
-      setState('largeEditor', null);
+      setState(
+        produce((s) => {
+          setComposerDraftState(s, value, false);
+          s.composerExternalValue = { value, nonce: Date.now() };
+          s.largeEditor = null;
+        })
+      );
       return;
     }
     // edit modes: persist any newly added attachments and stitch markdown refs into content

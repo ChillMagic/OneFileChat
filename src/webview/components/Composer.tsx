@@ -2,6 +2,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import { state, actions } from '../store';
 import {
   formatBytes,
+  getPromptHistoryDirection,
   getSelectionLabel,
   hasLocalMarkdownAssetReference,
   isPromptHistoryShortcut,
@@ -290,6 +291,7 @@ export function Composer() {
         textareaRef.value = '';
         autoResize();
       }
+      actions.resetComposerDraft('');
       actions.clearAttachments();
       actions.setAutoFollow(true);
       scheduleAutoFollow('smooth');
@@ -373,10 +375,17 @@ export function Composer() {
           rows={1}
           disabled={isLocked()}
           placeholder={t('composer.promptPlaceholder')}
-          onInput={() => autoResize()}
+          onInput={() => {
+            autoResize();
+            actions.syncComposerDraft(textareaRef?.value ?? '');
+          }}
           onKeyDown={(e) => {
-            if (isPromptHistoryShortcut(e)) {
+            const promptHistoryDirection = getPromptHistoryDirection(e);
+            if (promptHistoryDirection) {
               e.stopPropagation();
+              if (actions.stepComposerHistory(promptHistoryDirection)) {
+                e.preventDefault();
+              }
               return;
             }
             const isSubmit = e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey;
@@ -406,6 +415,7 @@ export function Composer() {
                   const cursor = start + result.text.length;
                   textareaRef.setSelectionRange(cursor, cursor);
                   autoResize();
+                  actions.syncComposerDraft(textareaRef.value);
                   if (Array.isArray(result.attachments) && result.attachments.length > 0) {
                     const items = result.attachments.map((a, i) => ({
                       id: `clip-${Date.now()}-${i}`,
@@ -482,7 +492,7 @@ export function Composer() {
               disabled={isLocked()}
               onClick={() => {
                 if (isLocked()) return;
-                actions.openLargeEditor('composer', textareaRef?.value ?? '');
+                actions.openLargeEditor('composer', textareaRef?.value ?? state.composerDraft);
               }}
             >
               <span class="codicon codicon-screen-full" aria-hidden="true" />

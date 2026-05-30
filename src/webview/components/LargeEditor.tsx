@@ -2,6 +2,7 @@ import { For, Show, createEffect, createSignal, onCleanup, onMount, untrack } fr
 import { state, actions } from '../store';
 import {
   formatBytes,
+  getPromptHistoryDirection,
   hasLocalMarkdownAssetReference,
   isPromptHistoryShortcut,
   readAttachmentsFromFiles
@@ -120,8 +121,10 @@ export function LargeEditor() {
   });
 
   function closeForCurrentMode() {
-    if (isComposerMode()) actions.closeLargeEditor();
-    else actions.cancelEditing(); // also closes the large editor
+    if (isComposerMode()) {
+      pushValueToStore();
+      actions.closeLargeEditor();
+    } else actions.cancelEditing(); // also closes the large editor
   }
 
   onMount(() => {
@@ -167,8 +170,12 @@ export function LargeEditor() {
 
   function onTextareaKey(e: KeyboardEvent) {
     // Stop outer listeners from hijacking native undo/redo (Ctrl/Cmd + Z / Y).
-    if (isPromptHistoryShortcut(e)) {
+    const promptHistoryDirection = getPromptHistoryDirection(e);
+    if (promptHistoryDirection) {
       e.stopPropagation();
+      if (isComposerMode() && actions.stepComposerHistory(promptHistoryDirection)) {
+        e.preventDefault();
+      }
       return;
     }
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {

@@ -294,6 +294,14 @@ export function isPromptHistoryShortcut(e: KeyboardEvent): boolean {
   return key === 'z' || key === 'y';
 }
 
+export function getPromptHistoryDirection(e: KeyboardEvent): 'undo' | 'redo' | null {
+  if (!isPromptHistoryShortcut(e)) return null;
+  const key = String(e.key || '').toLowerCase();
+  if (key === 'y' || (key === 'z' && e.shiftKey)) return 'redo';
+  if (key === 'z') return 'undo';
+  return null;
+}
+
 export function hasLocalMarkdownAssetReference(text: string): boolean {
   return typeof text === 'string' && text.includes('.filechat/assets/') && /!?\[[^\]\r\n]*\]\([^\)\r\n]*\.filechat\/assets\//.test(text);
 }
