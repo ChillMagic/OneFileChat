@@ -184,6 +184,8 @@ export function Composer() {
   let textareaRef: HTMLTextAreaElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   let dragDepth = 0;
+  let modelButtonAttentionTimer: number | undefined;
+  const [isModelButtonAttentionActive, setModelButtonAttentionActive] = createSignal(false);
 
   function isLocked() {
     return state.isBusy || state.pendingSubmission !== null;
@@ -233,6 +235,12 @@ export function Composer() {
     });
   });
 
+  onCleanup(() => {
+    if (modelButtonAttentionTimer !== undefined) {
+      window.clearTimeout(modelButtonAttentionTimer);
+    }
+  });
+
   // Auto-follow loop reacts to autoFollow/editing changes
   createEffect(() => {
     state.autoFollow;
@@ -264,6 +272,17 @@ export function Composer() {
     scheduleAutoFollow('auto');
   });
 
+  createEffect(() => {
+    const nonce = state.modelSelectionAttentionNonce;
+    if (!nonce) return;
+    setModelButtonAttentionActive(false);
+    queueMicrotask(() => setModelButtonAttentionActive(true));
+    if (modelButtonAttentionTimer !== undefined) {
+      window.clearTimeout(modelButtonAttentionTimer);
+    }
+    modelButtonAttentionTimer = window.setTimeout(() => setModelButtonAttentionActive(false), 1100);
+  });
+
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
     if (state.isBusy) {
@@ -274,9 +293,9 @@ export function Composer() {
     const prompt = textareaRef?.value.trim() ?? '';
     if (!prompt && state.pendingAttachments.length === 0) return;
     if (!state.canSend) {
-      // surface the error inline (no dedicated setter — we use store directly)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (state as any).error = t('composer.selectModelRequired');
+      if (state.availableProviders.length > 0 && (!state.currentSelection?.providerId || !state.currentSelection?.modelId)) {
+        actions.nudgeModelSelection();
+      }
       return;
     }
     const attachments = state.pendingAttachments.map((a) => ({
@@ -525,7 +544,8 @@ export function Composer() {
                 type="button"
                 class="composer-model-button"
                 classList={{
-                  'composer-model-button-warning': !state.canSend && state.availableProviders.length > 0
+                  'composer-model-button-warning': !state.canSend && state.availableProviders.length > 0,
+                  'composer-model-button-attention': isModelButtonAttentionActive()
                 }}
                 disabled={isLocked() || state.availableProviders.length === 0}
                 title={modelButtonLabel()}

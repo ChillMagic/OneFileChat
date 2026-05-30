@@ -2219,6 +2219,7 @@ body {
   line-height: 1;
   cursor: pointer;
   min-width: 0;
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
 }
 
 .composer-model-button:hover:not(:disabled) {
@@ -2231,7 +2232,32 @@ body {
 }
 
 .composer-model-button-warning {
-  border-color: transparent;
+  border-color: color-mix(in srgb, var(--vscode-inputValidation-warningBorder, var(--vscode-focusBorder)) 54%, transparent);
+  background: color-mix(in srgb, var(--vscode-inputValidation-warningBackground, var(--vscode-focusBorder)) 12%, transparent);
+}
+
+.composer-model-button-attention {
+  animation: composer-model-button-attention 960ms ease-out 1;
+}
+
+@keyframes composer-model-button-attention {
+  0% {
+    border-color: color-mix(in srgb, var(--vscode-inputValidation-warningBorder, var(--vscode-focusBorder)) 54%, transparent);
+    background: color-mix(in srgb, var(--vscode-inputValidation-warningBackground, var(--vscode-focusBorder)) 12%, transparent);
+    box-shadow: none;
+  }
+
+  32% {
+    border-color: var(--vscode-focusBorder);
+    background: color-mix(in srgb, var(--vscode-focusBorder) 22%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--vscode-focusBorder) 18%, transparent);
+  }
+
+  100% {
+    border-color: color-mix(in srgb, var(--vscode-inputValidation-warningBorder, var(--vscode-focusBorder)) 54%, transparent);
+    background: color-mix(in srgb, var(--vscode-inputValidation-warningBackground, var(--vscode-focusBorder)) 12%, transparent);
+    box-shadow: none;
+  }
 }
 
 .composer-model-button-label {

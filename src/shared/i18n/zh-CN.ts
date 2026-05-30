@@ -40,8 +40,7 @@ const messages = {
     removeAttachment: '移除',
     imageItemFallback: '图片 {n}',
     fileItemFallback: '文件 {n}',
-    fileLabel: '文件',
-    selectModelRequired: '请先在顶部菜单选择模型。'
+    fileLabel: '文件'
   },
   modelMenu: {
     title: '选择模型',
@@ -206,7 +205,6 @@ const messages = {
     unknown: '未知错误',
     titleEmpty: '标题不能为空',
     titleSameAsCurrent: '标题与当前一致',
-    selectModelFirst: '请先在顶部菜单选择模型。',
     cannotDeleteCurrentVersion: '当前版本无法直接删除，请先切换到其他版本',
     needAtLeastOneVersion: '至少需要保留一个版本',
     versionNotFound: '未找到对应的版本',
@@ -239,7 +237,7 @@ const messages = {
     firstSendCreateChatFailed: '首次发送前创建聊天文件失败。',
     invalidModelSelection: '当前模型选择无效，请重新选择。',
     pendingReplyInProgress: '当前已有回复在生成，请先停止或等待完成。',
-    selectModelFirst: '请先在顶部菜单选择模型。',
+    selectModelFirst: '当前未选择模型。',
     noRetryableAssistantMessage: '未找到可重试的助手消息。',
     noUserMessageForReply: '未找到与这条回复对应的用户消息。',
     noResendableMessage: '未找到可重发的消息。',
@@ -331,7 +329,7 @@ const messages = {
     modelReturnedEmpty: '模型返回了空内容。',
     titleGenerationTimeout: '生成标题超时，请稍后重试。',
     titleSelectionModelInvalid: 'key.json 的 titleGeneration.selection 指向的模型无效：{detail}',
-    noTitleModelAvailable: '当前会话还没有可用于生成标题的 AI。请先在聊天顶部选择模型，或在 key.json 的 titleGeneration.selection 里指定标题模型。',
+    noTitleModelAvailable: '当前会话还没有可用于生成标题的 AI。请先生成一条助手消息，或在 key.json 的 titleGeneration.selection 里指定标题模型。',
     selectedModelNotFound: '当前选择的模型不存在，请重新选择。',
     optionConfigReservedFields: 'option.config 里包含保留字段：{fields}。请删除这些字段。',
     attachmentBinaryNote: '{header}\n说明：这是一个二进制文件，当前请求只发送文件元数据，未发送文件正文。',

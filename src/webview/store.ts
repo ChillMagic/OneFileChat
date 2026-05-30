@@ -73,6 +73,7 @@ export interface AppState {
   composerDraft: string;
   composerHistoryEntries: string[];
   composerHistoryIndex: number;
+  modelSelectionAttentionNonce: number;
 }
 
 function emptyConfigField(): WebviewConfigFieldState {
@@ -154,7 +155,8 @@ const initial: AppState = {
   composerExternalValue: null,
   composerDraft: '',
   composerHistoryEntries: [''],
-  composerHistoryIndex: 0
+  composerHistoryIndex: 0,
+  modelSelectionAttentionNonce: 0
 };
 
 export const [state, setState] = createStore<AppState>(initial);
@@ -272,6 +274,9 @@ export const actions = {
         s.menuDraftSelection = next ? (s.currentSelection ? { ...s.currentSelection } : null) : null;
       })
     );
+  },
+  nudgeModelSelection() {
+    setState('modelSelectionAttentionNonce', (value) => value + 1);
   },
   pickProvider(providerId: string) {
     setState('menuDraftSelection', { providerId, modelId: '', optionId: undefined });

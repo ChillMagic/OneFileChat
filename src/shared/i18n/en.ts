@@ -39,8 +39,7 @@ const messages: MessageDict = {
     removeAttachment: 'Remove',
     imageItemFallback: 'Image {n}',
     fileItemFallback: 'File {n}',
-    fileLabel: 'File',
-    selectModelRequired: 'Please pick a model from the top menu first.'
+    fileLabel: 'File'
   },
   modelMenu: {
     title: 'Select a model',
@@ -210,7 +209,6 @@ const messages: MessageDict = {
     unknown: 'Unknown error',
     titleEmpty: 'Title cannot be empty',
     titleSameAsCurrent: 'Title is unchanged',
-    selectModelFirst: 'Please pick a model from the top menu first.',
     cannotDeleteCurrentVersion:
       'Cannot delete the active version directly; switch to another version first.',
     needAtLeastOneVersion: 'At least one version must remain.',
@@ -247,7 +245,7 @@ const messages: MessageDict = {
     invalidModelSelection: 'The current model selection is invalid. Please pick again.',
     pendingReplyInProgress:
       'A reply is already being generated. Stop it or wait for it to finish first.',
-    selectModelFirst: 'Please pick a model from the top menu first.',
+    selectModelFirst: 'No model is currently selected.',
     noRetryableAssistantMessage: 'No retryable assistant message was found.',
     noUserMessageForReply: 'No matching user message was found for this reply.',
     noResendableMessage: 'No message available to resend.',
@@ -348,7 +346,7 @@ const messages: MessageDict = {
     titleSelectionModelInvalid:
       'key.json `titleGeneration.selection` points to an invalid model: {detail}',
     noTitleModelAvailable:
-      'No AI is available to generate a title yet. Pick a model in the chat header, or set `titleGeneration.selection` in key.json.',
+      'No AI is available to generate a title yet. Generate one assistant reply first, or set `titleGeneration.selection` in key.json.',
     selectedModelNotFound: 'The selected model no longer exists. Please pick again.',
     optionConfigReservedFields: 'option.config contains reserved fields: {fields}. Remove them.',
     attachmentBinaryNote:

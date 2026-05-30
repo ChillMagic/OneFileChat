@@ -1102,7 +1102,9 @@ function formatSessionUpdatedAt(value: string): string {
     return t('host.timeUnknown');
   }
 
+  const now = new Date();
   return new Intl.DateTimeFormat(getLocale(), {
+    ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}),
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
