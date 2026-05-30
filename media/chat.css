@@ -189,15 +189,176 @@ body {
   top: calc(100% + 8px);
   right: 0;
   z-index: 20;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  width: min(720px, calc(100vw - 40px));
-  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  width: min(340px, calc(100vw - 40px));
+  max-height: min(60vh, 420px);
+  padding: 6px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--vscode-editorWidget-background);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.model-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.model-menu-heading {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vscode-editor-foreground);
+}
+
+.model-menu-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.model-menu-gear:hover {
+  background: var(--hover-bg);
+  color: var(--vscode-editor-foreground);
+}
+
+.model-menu-gear .codicon {
+  font-size: 14px;
+}
+
+.model-menu-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.model-menu-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.model-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vscode-editor-foreground);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-menu-row:hover {
+  background: var(--hover-bg);
+}
+
+.model-menu-row.is-selected {
+  background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 22%, transparent);
+}
+
+.model-menu-row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.model-menu-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-menu-row-provider {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.model-menu-row-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.model-menu-row-badge {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vscode-badge-background) 70%, transparent);
+  color: var(--vscode-badge-foreground);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.model-menu-row-chevron {
+  font-size: 12px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.model-menu-row-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.model-menu-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 4px 24px;
+  padding-left: 8px;
+  border-left: 1px solid var(--hairline);
+}
+
+.model-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vscode-editor-foreground);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.model-menu-option:hover {
+  background: var(--hover-bg);
+}
+
+.model-menu-option.is-selected {
+  background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 22%, transparent);
+}
+
+.model-menu-option-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-menu-column {
@@ -2049,7 +2210,7 @@ body {
   max-width: min(280px, 50vw);
   height: 28px;
   padding: 0 8px;
-  border: 1px solid var(--border-color);
+  border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
   color: var(--vscode-editor-foreground);
@@ -2061,7 +2222,7 @@ body {
 }
 
 .composer-model-button:hover:not(:disabled) {
-  border-color: var(--vscode-focusBorder);
+  background: var(--hover-bg);
 }
 
 .composer-model-button:disabled {
@@ -2070,7 +2231,7 @@ body {
 }
 
 .composer-model-button-warning {
-  border-color: var(--vscode-inputValidation-warningBorder, var(--vscode-focusBorder));
+  border-color: transparent;
 }
 
 .composer-model-button-label {
@@ -2089,13 +2250,13 @@ body {
 }
 
 .composer-footer .model-menu {
-  position: fixed;
+  position: absolute;
   top: auto;
-  bottom: calc(var(--composer-shell-height) + 4px);
-  right: 12px;
+  bottom: calc(100% + 8px);
+  right: 0;
   left: auto;
   max-width: calc(100vw - 24px);
-  width: min(720px, calc(100vw - 24px));
+  width: min(320px, calc(100vw - 24px));
 }
 
 .busy-text {
@@ -2148,8 +2309,7 @@ body {
   }
 
   .composer-footer .model-menu {
-    width: min(440px, calc(100vw - 24px));
-    grid-template-columns: 1fr;
+    width: min(320px, calc(100vw - 24px));
   }
 }
 

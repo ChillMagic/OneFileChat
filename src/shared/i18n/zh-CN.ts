@@ -44,6 +44,7 @@ const messages = {
     selectModelRequired: '请先在顶部菜单选择模型。'
   },
   modelMenu: {
+    title: '选择模型',
     provider: 'Provider',
     model: 'Model',
     options: '选项',

@@ -43,6 +43,7 @@ const messages: MessageDict = {
     selectModelRequired: 'Please pick a model from the top menu first.'
   },
   modelMenu: {
+    title: 'Select a model',
     provider: 'Provider',
     model: 'Model',
     options: 'Options',

@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { state, actions } from '../store';
 import {
   formatBytes,
@@ -11,94 +11,129 @@ import { scheduleAutoFollow, scrollToBottom, syncAutoFollowLoop, syncLayoutMetri
 import { t } from '../../shared/i18n';
 
 function ModelMenu(props: { onClose: () => void }) {
-  const draft = () => state.menuDraftSelection;
-  const activeProvider = createMemo(() =>
-    draft()?.providerId ? state.availableProviders.find((p) => p.id === draft()!.providerId) ?? null : null
-  );
-  const activeModel = createMemo(() => {
-    const ap = activeProvider();
-    const mid = draft()?.modelId;
-    return ap && mid ? ap.models.find((m) => m.id === mid) ?? null : null;
+  void props;
+  const [expandedKey, setExpandedKey] = createSignal<string | null>(null);
+  const cur = () => state.currentSelection;
+  const multiProvider = createMemo(() => state.availableProviders.length > 1);
+
+  const isCurrentModel = (providerId: string, modelId: string) =>
+    cur()?.providerId === providerId && cur()?.modelId === modelId;
+
+  const currentOptionLabel = (providerId: string, model: { id: string; options: { id: string; label: string }[] }) => {
+    if (!isCurrentModel(providerId, model.id)) return '';
+    const oid = cur()?.optionId;
+    if (!oid) return '';
+    return model.options.find((o) => o.id === oid)?.label ?? '';
+  };
+
+  // 打开菜单时，若当前选中的模型带子选项，自动展开它的选项列表
+  createEffect(() => {
+    if (!state.isModelMenuOpen) {
+      setExpandedKey(null);
+      return;
+    }
+    const c = state.currentSelection;
+    if (c?.providerId && c?.modelId) {
+      const p = state.availableProviders.find((pp) => pp.id === c.providerId);
+      const m = p?.models.find((mm) => mm.id === c.modelId);
+      if (m && Array.isArray(m.options) && m.options.length > 0) {
+        setExpandedKey(`${c.providerId}::${c.modelId}`);
+        return;
+      }
+    }
+    setExpandedKey(null);
   });
+
+  function selectModel(providerId: string, modelId: string, optionId: string | undefined) {
+    // 复用既有 action 序列：pickProvider -> pickModel -> pickOption（同步提交并关闭菜单）
+    actions.pickProvider(providerId);
+    actions.pickModel(modelId);
+    actions.pickOption(optionId);
+  }
 
   return (
     <div id="modelMenu" classList={{ 'model-menu': true, hidden: !state.isModelMenuOpen }} onClick={(e) => e.stopPropagation()}>
-      <div class="model-menu-column">
-        <p class="model-menu-title">{t('modelMenu.provider')}</p>
-        <div id="providerList" class="model-menu-list">
-          <Show when={state.availableProviders.length > 0} fallback={<p class="model-menu-empty">{t('modelMenu.noProvider')}</p>}>
-            <For each={state.availableProviders}>
-              {(p) => (
-                <button
-                  type="button"
-                  classList={{
-                    'model-menu-item': true,
-                    'is-selected': draft()?.providerId === p.id
-                  }}
-                  onClick={() => actions.pickProvider(p.id)}
-                >
-                  {p.label}
-                </button>
-              )}
-            </For>
-          </Show>
-        </div>
+      <div class="model-menu-header">
+        <span class="model-menu-heading">{t('modelMenu.title')}</span>
+        <button
+          type="button"
+          class="model-menu-gear"
+          title={t('composer.manageProvider')}
+          aria-label={t('composer.manageProvider')}
+          onClick={() => actions.manageProviderConfig()}
+        >
+          <span class="codicon codicon-settings-gear" aria-hidden="true" />
+        </button>
       </div>
-      <div class="model-menu-column">
-        <p class="model-menu-title">{t('modelMenu.model')}</p>
-        <div id="modelList" class="model-menu-list">
-          <Show when={activeProvider()} fallback={<p class="model-menu-empty">{t('modelMenu.selectProviderFirst')}</p>}>
-            <For each={activeProvider()!.models}>
-              {(m) => (
-                <button
-                  type="button"
-                  classList={{
-                    'model-menu-item': true,
-                    'is-selected': draft()?.modelId === m.id
-                  }}
-                  onClick={() => {
-                    actions.pickModel(m.id);
-                    // 无子选项的模型：立即提交，等同于原版 commitModelSelection 行为
-                    if (!Array.isArray(m.options) || m.options.length === 0) {
-                      actions.pickOption(undefined);
-                    }
-                  }}
-                >
-                  {m.label}
-                </button>
-              )}
-            </For>
-          </Show>
-        </div>
-      </div>
-      <div class="model-menu-column">
-        <p class="model-menu-title">{t('modelMenu.options')}</p>
-        <div id="optionList" class="model-menu-list">
-          <Show
-            when={activeModel()}
-            fallback={<p class="model-menu-empty">{t('modelMenu.selectModelFirst')}</p>}
-          >
-            <Show
-              when={Array.isArray(activeModel()!.options) && activeModel()!.options.length > 0}
-              fallback={<p class="model-menu-empty">{t('modelMenu.noOptionsForModel')}</p>}
-            >
-              <For each={activeModel()!.options}>
-                {(o) => (
-                  <button
-                    type="button"
-                    classList={{
-                      'model-menu-item': true,
-                      'is-selected': draft()?.optionId === o.id
-                    }}
-                    onClick={() => actions.pickOption(o.id)}
-                  >
-                    {o.label}
-                  </button>
-                )}
+      <div class="model-menu-scroll">
+        <Show when={state.availableProviders.length > 0} fallback={<p class="model-menu-empty">{t('modelMenu.noProvider')}</p>}>
+          <For each={state.availableProviders}>
+            {(p) => (
+              <For each={p.models}>
+                {(m) => {
+                  const key = `${p.id}::${m.id}`;
+                  const hasOptions = () => Array.isArray(m.options) && m.options.length > 0;
+                  const expanded = () => expandedKey() === key;
+                  return (
+                    <div class="model-menu-group">
+                      <button
+                        type="button"
+                        classList={{
+                          'model-menu-row': true,
+                          'is-selected': isCurrentModel(p.id, m.id),
+                          'is-expanded': expanded()
+                        }}
+                        onClick={() => {
+                          if (hasOptions()) {
+                            setExpandedKey((k) => (k === key ? null : key));
+                          } else {
+                            selectModel(p.id, m.id, undefined);
+                          }
+                        }}
+                      >
+                        <span class="model-menu-row-main">
+                          <span class="model-menu-row-label">{m.label}</span>
+                          <Show when={multiProvider()}>
+                            <span class="model-menu-row-provider">{p.label}</span>
+                          </Show>
+                        </span>
+                        <span class="model-menu-row-trailing">
+                          <Show when={currentOptionLabel(p.id, m)}>
+                            <span class="model-menu-row-badge">{currentOptionLabel(p.id, m)}</span>
+                          </Show>
+                          <Show when={hasOptions()}>
+                            <span
+                              classList={{ codicon: true, 'codicon-chevron-down': true, 'model-menu-row-chevron': true, 'is-open': expanded() }}
+                              aria-hidden="true"
+                            />
+                          </Show>
+                        </span>
+                      </button>
+                      <Show when={hasOptions() && expanded()}>
+                        <div class="model-menu-options">
+                          <For each={m.options}>
+                            {(o) => (
+                              <button
+                                type="button"
+                                classList={{
+                                  'model-menu-option': true,
+                                  'is-selected': isCurrentModel(p.id, m.id) && cur()?.optionId === o.id
+                                }}
+                                onClick={() => selectModel(p.id, m.id, o.id)}
+                              >
+                                <span class="model-menu-option-label">{o.label}</span>
+                              </button>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
+                    </div>
+                  );
+                }}
               </For>
-            </Show>
-          </Show>
-        </div>
+            )}
+          </For>
+        </Show>
       </div>
     </div>
   );
