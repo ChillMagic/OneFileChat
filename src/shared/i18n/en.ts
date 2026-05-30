@@ -315,6 +315,7 @@ const messages: MessageDict = {
     attachmentImageBracket: '[image: {name}]',
     attachmentFileBracket: '[file: {name}]',
     cannotWriteChatFile: 'Failed to write the chat file.',
+    cannotModifyCorruptChat: 'Cannot modify the chat file because it could not be parsed: {error}',
     chatFileUpdatedSaveFailed: 'The chat file was updated but failed to save.',
     keyFileNotFound: 'No key config file found. Checked: {paths}',
     keyJsonRootMustBeObject: 'The key.json root must be a JSON object.',

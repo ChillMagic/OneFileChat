@@ -612,6 +612,10 @@ async function renameChatTitle(targetUri: vscode.Uri): Promise<void> {
   const document = await vscode.workspace.openTextDocument(targetUri);
   const fallbackTitle = trimChatFileSuffix(path.basename(targetUri.fsPath));
   const parsed = safeParseChatDocument(document.getText(), fallbackTitle);
+  if (parsed.error) {
+    throw new Error(t('host.cannotModifyCorruptChat', { error: parsed.error }));
+  }
+
   const nextTitle = await vscode.window.showInputBox({
     prompt: t('host.renameChatPrompt'),
     value: parsed.chat.title,
@@ -637,6 +641,10 @@ async function regenerateChatTitle(targetUri: vscode.Uri): Promise<boolean> {
   const document = await vscode.workspace.openTextDocument(targetUri);
   const fallbackTitle = trimChatFileSuffix(path.basename(targetUri.fsPath));
   const parsed = safeParseChatDocument(document.getText(), fallbackTitle);
+  if (parsed.error) {
+    throw new Error(t('host.cannotModifyCorruptChat', { error: parsed.error }));
+  }
+
   const keyConfig = await loadKeyConfig(document);
   const nextTitle = await generateChatTitleWithAI(parsed.chat, keyConfig);
   if (!nextTitle || nextTitle === parsed.chat.title) {
@@ -1431,7 +1439,8 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
     let sourceText: string;
     try {
       sourceText = document.isClosed ? decodeUtf8(await vscode.workspace.fs.readFile(document.uri)) : document.getText();
-    } catch {
+    } catch (error) {
+      console.error(`[onefilechat] Failed to read chat document while persisting streamed snapshot for ${documentKey}:`, error);
       return;
     }
 
@@ -1456,11 +1465,16 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
       });
 
       nextContent = serializeChatFile(nextChat);
-    } catch {
+    } catch (error) {
+      console.error(`[onefilechat] Failed to persist streamed snapshot for message ${latestSnapshot.messageId} in ${documentKey}:`, error);
       return;
     }
 
-    await vscode.workspace.fs.writeFile(document.uri, Buffer.from(nextContent, 'utf8'));
+    try {
+      await vscode.workspace.fs.writeFile(document.uri, Buffer.from(nextContent, 'utf8'));
+    } catch (error) {
+      console.error(`[onefilechat] Failed to write streamed snapshot for ${documentKey}:`, error);
+    }
   }
 
   async resolveCustomTextEditor(
@@ -1664,6 +1678,8 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
         currentError = undefined;
 
         try {
+          this.assertDocumentNotBusy(document);
+
           const keyConfig = await loadKeyConfig(document);
           const nextSelection = normalizeChatModelSelection(
             {
@@ -1887,6 +1903,8 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
         currentError = undefined;
 
         try {
+          this.assertDocumentNotBusy(document);
+
           const currentChat = parseChatDocument(document.getText(), trimChatFileSuffix(path.basename(document.uri.fsPath)));
           const nextCommonConfigId = normalizeOptionalStringOrNull(message.commonConfigId) ?? null;
           if ((currentChat.commonConfigId ?? null) !== nextCommonConfigId) {
@@ -1908,6 +1926,8 @@ class OneFileChatEditorProvider implements vscode.CustomTextEditorProvider {
         currentError = undefined;
 
         try {
+          this.assertDocumentNotBusy(document);
+
           const currentChat = parseChatDocument(document.getText(), trimChatFileSuffix(path.basename(document.uri.fsPath)));
           const nextField = createInheritableTextFieldForSave(message.inherit, message.content);
           const currentField = message.field === 'systemPrompt' ? currentChat.systemPrompt : currentChat.messageTemplate;

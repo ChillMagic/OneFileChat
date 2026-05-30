@@ -302,6 +302,7 @@ const messages = {
     attachmentImageBracket: '[图片: {name}]',
     attachmentFileBracket: '[文件: {name}]',
     cannotWriteChatFile: '无法写入聊天文件。',
+    cannotModifyCorruptChat: '无法修改聊天文件，因为它解析失败：{error}',
     chatFileUpdatedSaveFailed: '聊天文件已更新，但保存失败。',
     keyFileNotFound: '未找到 key 配置文件。已检查：{paths}',
     keyJsonRootMustBeObject: 'key.json 根节点必须是 JSON 对象。',
