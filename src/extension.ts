@@ -1115,7 +1115,7 @@ function createSessionTooltip(session: ChatSessionSummary): vscode.MarkdownStrin
   markdown.isTrusted = false;
   markdown.appendMarkdown(`**${escapeMarkdown(session.title)}**\n\n`);
   markdown.appendMarkdown(t('host.sessionPathMd', { path: escapeMarkdown(session.relativePath) }));
-  markdown.appendMarkdown(t('host.sessionStatsMd', { count: session.messageCount, time: escapeMarkdown(session.updatedAt) }));
+  markdown.appendMarkdown(t('host.sessionStatsMd', { count: session.messageCount, time: escapeMarkdown(formatSessionUpdatedAt(session.updatedAt)) }));
   if (session.assistantName) {
     markdown.appendMarkdown(t('host.sessionAssistantMd', { name: escapeMarkdown(session.assistantName) }));
   }
@@ -5230,7 +5230,7 @@ async function loadKeyConfigForResource(resourceUri?: vscode.Uri): Promise<KeyFi
   let fileContent: Uint8Array;
 
   if (!keyUri) {
-    throw new Error(t('host.keyFileNotFound', { paths: candidateKeyUris.map((uri) => uri.fsPath).join('；') }));
+    throw new Error(t('host.keyFileNotFound', { paths: candidateKeyUris.map((uri) => uri.fsPath).join('; ') }));
   }
 
   fileContent = await vscode.workspace.fs.readFile(keyUri);
