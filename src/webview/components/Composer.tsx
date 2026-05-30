@@ -350,7 +350,6 @@ export function Composer() {
           id="imageInput"
           ref={(el) => (fileInputRef = el)}
           type="file"
-          accept="image/*"
           multiple
           hidden
           disabled={isLocked()}

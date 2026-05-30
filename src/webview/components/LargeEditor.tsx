@@ -235,7 +235,6 @@ export function LargeEditor() {
               <input
                 ref={(el) => (fileInputRef = el)}
                 type="file"
-                accept="image/*"
                 multiple
                 hidden
                 disabled={isLocked()}
@@ -262,7 +261,7 @@ export function LargeEditor() {
                 }}
               >
                 <span class="codicon codicon-attach" aria-hidden="true" />
-                <span>{t('editor.addImage')}</span>
+                <span>{t('editor.addAttachment')}</span>
               </button>
               <button
                 type="button"
