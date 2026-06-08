@@ -228,6 +228,7 @@ const messages = {
     sessionPathMd: '路径: {path}\n\n',
     sessionStatsMd: '消息数: {count}  更新时间: {time}\n\n',
     sessionAssistantMd: '助手: {name}\n\n',
+    sessionFolderLoadErrorMd: '加载错误: {detail}',
     sessionParseErrorMd: '解析错误: {detail}',
     cannotGenerateUniqueFileName: '无法生成唯一的聊天文件名，请重试。',
     generalAssistantName: '通用助手',

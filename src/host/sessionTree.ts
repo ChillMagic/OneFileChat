@@ -40,6 +40,11 @@ import type {
   ChatSessionTreeNode
 } from './chat';
 
+interface DirectoryChildrenLoadResult {
+  children: ChatSessionTreeNode[];
+  error?: string;
+}
+
 export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSessionTreeNode> {
   private readonly changeEmitter = new vscode.EventEmitter<ChatSessionTreeNode | undefined | null | void>();
   private rootNodes: ChatSessionTreeNode[] | undefined;
@@ -51,14 +56,14 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
 
   getTreeItem(element: ChatSessionTreeNode): vscode.TreeItem {
     if (element.kind === 'folder') {
-      const collapsibleState = element.childrenLoaded && element.children.length === 0
+      const collapsibleState = element.childrenLoaded && element.children.length === 0 && !element.loadError
         ? vscode.TreeItemCollapsibleState.None
         : vscode.TreeItemCollapsibleState.Collapsed;
       const item = new vscode.TreeItem(element.label, collapsibleState);
       item.id = element.id;
       item.contextValue = 'onefilechatFolder';
-      item.iconPath = new vscode.ThemeIcon('folder');
-      item.tooltip = element.relativePath || element.label;
+      item.iconPath = new vscode.ThemeIcon(element.loadError ? 'warning' : 'folder');
+      item.tooltip = createFolderTooltip(element);
       return item;
     }
 
@@ -152,7 +157,12 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     }
 
     const [workspaceFolder] = workspaceFolders;
-    const rootNodes = await this.loadDirectoryChildren(workspaceFolder.uri);
+    const result = await this.loadDirectoryChildren(workspaceFolder.uri);
+    if (result.error) {
+      return [this.createDirectoryNode(workspaceFolder.uri, workspaceFolder.name, result.error)];
+    }
+
+    const rootNodes = result.children;
     this.loadedDirectoryChildren.set(workspaceFolder.uri.toString(), rootNodes);
     return rootNodes;
   }
@@ -167,6 +177,7 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     if (cachedChildren) {
       folder.children = cachedChildren;
       folder.childrenLoaded = true;
+      folder.loadError = undefined;
       return cachedChildren;
     }
 
@@ -176,10 +187,21 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     }
 
     const load = this.loadDirectoryChildren(folder.uri)
-      .then((children) => {
+      .then((result) => {
+        if (result.error) {
+          this.loadedDirectoryChildren.delete(directoryKey);
+          folder.children = [];
+          folder.childrenLoaded = false;
+          folder.loadError = result.error;
+          this.changeEmitter.fire(folder);
+          return [];
+        }
+
+        const { children } = result;
         this.loadedDirectoryChildren.set(directoryKey, children);
         folder.children = children;
         folder.childrenLoaded = true;
+        folder.loadError = undefined;
         this.changeEmitter.fire(folder);
         return children;
       })
@@ -190,12 +212,12 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     return load;
   }
 
-  private async loadDirectoryChildren(directoryUri: vscode.Uri): Promise<ChatSessionTreeNode[]> {
+  private async loadDirectoryChildren(directoryUri: vscode.Uri): Promise<DirectoryChildrenLoadResult> {
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(directoryUri);
-    } catch {
-      return [];
+    } catch (error) {
+      return { children: [], error: toErrorMessage(error) };
     }
 
     const folders: ChatSessionFolderNode[] = [];
@@ -215,10 +237,10 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     }
 
     const sessions = await mapWithConcurrency(sessionUris, 8, createChatSessionSummary);
-    return sortChatSessionTreeNodes([...folders, ...sessions]);
+    return { children: sortChatSessionTreeNodes([...folders, ...sessions]) };
   }
 
-  private createDirectoryNode(uri: vscode.Uri, label: string): ChatSessionFolderNode {
+  private createDirectoryNode(uri: vscode.Uri, label: string, loadError?: string): ChatSessionFolderNode {
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
     const workspaceKey = workspaceFolder?.uri.toString() ?? '';
     const relativePath = getDirectoryRelativePath(uri);
@@ -229,7 +251,8 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       relativePath: relativePath || label,
       uri,
       children: [],
-      childrenLoaded: false
+      childrenLoaded: false,
+      loadError
     };
     this.folderNodesByDirectory.set(uri.toString(), node);
     return node;
@@ -243,6 +266,7 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     if (folder) {
       folder.children = children;
       folder.childrenLoaded = true;
+      folder.loadError = undefined;
       this.changeEmitter.fire(folder);
       return;
     }
@@ -619,17 +643,21 @@ export async function mapWithConcurrency<T, R>(
     return [];
   }
 
-  const results: R[] = new Array(items.length);
+  const results: Array<R | undefined> = new Array(items.length);
   let nextIndex = 0;
   const workerCount = Math.max(1, Math.min(concurrency, items.length));
   await Promise.all(Array.from({ length: workerCount }, async () => {
     while (nextIndex < items.length) {
       const currentIndex = nextIndex;
       nextIndex += 1;
-      results[currentIndex] = await mapper(items[currentIndex]);
+      try {
+        results[currentIndex] = await mapper(items[currentIndex]);
+      } catch (error) {
+        console.warn('Failed to load chat session tree item.', error);
+      }
     }
   }));
-  return results;
+  return results.filter((result): result is R => result !== undefined);
 }
 
 export async function createChatSessionSummary(uri: vscode.Uri): Promise<ChatSessionSummary> {
@@ -893,6 +921,17 @@ export function createSessionTooltip(session: ChatSessionSummary): vscode.Markdo
   }
   if (session.error) {
     markdown.appendMarkdown(t('host.sessionParseErrorMd', { detail: escapeMarkdown(session.error) }));
+  }
+  return markdown;
+}
+
+export function createFolderTooltip(folder: ChatSessionFolderNode): vscode.MarkdownString {
+  const markdown = new vscode.MarkdownString(undefined, true);
+  markdown.isTrusted = false;
+  markdown.appendMarkdown(`**${escapeMarkdown(folder.label)}**\n\n`);
+  markdown.appendMarkdown(t('host.sessionPathMd', { path: escapeMarkdown(folder.relativePath || folder.label) }));
+  if (folder.loadError) {
+    markdown.appendMarkdown(t('host.sessionFolderLoadErrorMd', { detail: escapeMarkdown(folder.loadError) }));
   }
   return markdown;
 }

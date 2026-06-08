@@ -233,6 +233,7 @@ const messages: MessageDict = {
     sessionPathMd: 'Path: {path}\n\n',
     sessionStatsMd: 'Messages: {count}  Updated: {time}\n\n',
     sessionAssistantMd: 'Assistant: {name}\n\n',
+    sessionFolderLoadErrorMd: 'Load error: {detail}',
     sessionParseErrorMd: 'Parse error: {detail}',
     cannotGenerateUniqueFileName: 'Could not generate a unique chat file name. Please try again.',
     generalAssistantName: 'General assistant',
