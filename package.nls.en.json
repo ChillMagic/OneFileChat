@@ -9,5 +9,9 @@
   "commands.manageCommonConfig.title": "One File Chat: Manage Common Config",
   "commands.viewRawChatJson.title": "View Raw JSON",
   "views.sessionsView.name": "One File Chat",
-  "customEditors.chatEditor.displayName": "One File Chat"
+  "customEditors.chatEditor.displayName": "One File Chat",
+  "configuration.title": "One File Chat",
+  "configuration.sessions.scanConcurrency.description": "Normal concurrency for reading `.filechat.json` files while loading a session directory.",
+  "configuration.sessions.cautiousScanConcurrency.description": "Cautious concurrency for reading `.filechat.json` files after a slow or unstable file system is detected. The effective value will not exceed the normal concurrency.",
+  "configuration.sessions.adaptiveScanning.description": "Automatically lower or restore session scan concurrency based on scan duration and file system errors."
 }

@@ -9,5 +9,9 @@
   "commands.manageCommonConfig.title": "One File Chat: 管理通用配置",
   "commands.viewRawChatJson.title": "查看原始数据",
   "views.sessionsView.name": "One File Chat",
-  "customEditors.chatEditor.displayName": "One File Chat"
+  "customEditors.chatEditor.displayName": "One File Chat",
+  "configuration.title": "One File Chat",
+  "configuration.sessions.scanConcurrency.description": "加载会话目录时读取 `.filechat.json` 文件的正常并发数。",
+  "configuration.sessions.cautiousScanConcurrency.description": "检测到慢速或不稳定文件系统时读取 `.filechat.json` 文件的谨慎并发数。实际值不会高于正常并发数。",
+  "configuration.sessions.adaptiveScanning.description": "根据会话目录扫描耗时和文件系统错误自动降低或恢复扫描并发。"
 }

@@ -45,12 +45,55 @@ interface DirectoryChildrenLoadResult {
   error?: string;
 }
 
+interface ConcurrentMapResult<T> {
+  values: T[];
+  failures: number;
+  errors: string[];
+  durationMs: number;
+}
+
+interface SessionScanSettings {
+  adaptiveScanning: boolean;
+  normalConcurrency: number;
+  cautiousConcurrency: number;
+}
+
+interface SessionScanProfile {
+  mode: 'normal' | 'cautious';
+  successfulScans: number;
+}
+
+interface SessionScanResult {
+  durationMs: number;
+  failures: number;
+  errors: string[];
+}
+
+const SESSION_SCAN_SETTINGS_SECTION = 'onefilechat.sessions';
+const DEFAULT_SESSION_SCAN_CONCURRENCY = 8;
+const DEFAULT_CAUTION_SESSION_SCAN_CONCURRENCY = 2;
+const MAX_SESSION_SCAN_CONCURRENCY = 64;
+const SLOW_SESSION_SCAN_THRESHOLD_MS = 3_000;
+const CAUTIOUS_SCAN_RECOVERY_SUCCESSES = 3;
+const UNSTABLE_FILESYSTEM_ERROR_PATTERNS = [
+  /503/i,
+  /blockedtemporarily/i,
+  /too many requests/i,
+  /service unavailable/i,
+  /\bEIO\b/i,
+  /\bETIMEDOUT\b/i,
+  /\bECONNRESET\b/i,
+  /\bEHOSTUNREACH\b/i,
+  /\bENETUNREACH\b/i
+];
+
 export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSessionTreeNode> {
   private readonly changeEmitter = new vscode.EventEmitter<ChatSessionTreeNode | undefined | null | void>();
   private rootNodes: ChatSessionTreeNode[] | undefined;
   private readonly loadedDirectoryChildren = new Map<string, ChatSessionTreeNode[]>();
   private readonly pendingDirectoryLoads = new Map<string, Promise<ChatSessionTreeNode[]>>();
   private readonly folderNodesByDirectory = new Map<string, ChatSessionFolderNode>();
+  private readonly scanProfiles = new Map<string, SessionScanProfile>();
 
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
@@ -213,11 +256,18 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
   }
 
   private async loadDirectoryChildren(directoryUri: vscode.Uri): Promise<DirectoryChildrenLoadResult> {
+    const startedAt = Date.now();
     let entries: [string, vscode.FileType][];
     try {
       entries = await vscode.workspace.fs.readDirectory(directoryUri);
     } catch (error) {
-      return { children: [], error: toErrorMessage(error) };
+      const message = toErrorMessage(error);
+      this.recordDirectoryScanResult(directoryUri, {
+        durationMs: Date.now() - startedAt,
+        failures: 1,
+        errors: [message]
+      });
+      return { children: [], error: message };
     }
 
     const folders: ChatSessionFolderNode[] = [];
@@ -236,8 +286,21 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       }
     }
 
-    const sessions = await mapWithConcurrency(sessionUris, 8, createChatSessionSummary);
-    return { children: sortChatSessionTreeNodes([...folders, ...sessions]) };
+    const concurrency = this.getDirectoryScanConcurrency(directoryUri);
+    const sessionResult = await mapWithConcurrency(sessionUris, concurrency, createChatSessionSummary);
+    const sessionErrors = [
+      ...sessionResult.errors,
+      ...sessionResult.values
+        .map((session) => session.error)
+        .filter((error): error is string => Boolean(error && isUnstableFilesystemError(error)))
+    ];
+    this.recordDirectoryScanResult(directoryUri, {
+      durationMs: Date.now() - startedAt,
+      failures: sessionResult.failures + sessionErrors.length,
+      errors: sessionErrors
+    });
+
+    return { children: sortChatSessionTreeNodes([...folders, ...sessionResult.values]) };
   }
 
   private createDirectoryNode(uri: vscode.Uri, label: string, loadError?: string): ChatSessionFolderNode {
@@ -275,6 +338,69 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       this.rootNodes = children;
       this.changeEmitter.fire();
     }
+  }
+
+  private getDirectoryScanConcurrency(directoryUri: vscode.Uri): number {
+    const settings = getSessionScanSettings();
+    if (!settings.adaptiveScanning) {
+      return settings.normalConcurrency;
+    }
+
+    const profile = this.getScanProfile(directoryUri);
+    return profile.mode === 'cautious' ? settings.cautiousConcurrency : settings.normalConcurrency;
+  }
+
+  private recordDirectoryScanResult(directoryUri: vscode.Uri, result: SessionScanResult): void {
+    const settings = getSessionScanSettings();
+    if (!settings.adaptiveScanning) {
+      return;
+    }
+
+    const profile = this.getScanProfile(directoryUri);
+    const isUnstable = result.durationMs >= SLOW_SESSION_SCAN_THRESHOLD_MS
+      || result.errors.some(isUnstableFilesystemError);
+    const shouldUseCautiousMode = result.failures > 0 && (result.errors.length === 0 || isUnstable)
+      || isUnstable;
+
+    if (shouldUseCautiousMode) {
+      if (profile.mode !== 'cautious') {
+        console.warn(
+          `OneFileChat: switching session scan to cautious mode for ${this.getScanProfileKey(directoryUri)} `
+          + `after ${result.durationMs}ms with ${result.failures} failure(s).`
+        );
+      }
+      profile.mode = 'cautious';
+      profile.successfulScans = 0;
+      return;
+    }
+
+    if (profile.mode === 'cautious') {
+      profile.successfulScans += 1;
+      if (profile.successfulScans >= CAUTIOUS_SCAN_RECOVERY_SUCCESSES) {
+        profile.mode = 'normal';
+        profile.successfulScans = 0;
+        console.info(`OneFileChat: restored normal session scan concurrency for ${this.getScanProfileKey(directoryUri)}.`);
+      }
+    }
+  }
+
+  private getScanProfile(directoryUri: vscode.Uri): SessionScanProfile {
+    const key = this.getScanProfileKey(directoryUri);
+    const existing = this.scanProfiles.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    const profile: SessionScanProfile = {
+      mode: 'normal',
+      successfulScans: 0
+    };
+    this.scanProfiles.set(key, profile);
+    return profile;
+  }
+
+  private getScanProfileKey(directoryUri: vscode.Uri): string {
+    return vscode.workspace.getWorkspaceFolder(directoryUri)?.uri.toString() ?? directoryUri.toString();
   }
 }
 
@@ -634,16 +760,57 @@ export function shouldSkipChatDirectoryScan(name: string): boolean {
   ].includes(name);
 }
 
+export function getSessionScanSettings(): SessionScanSettings {
+  const config = vscode.workspace.getConfiguration(SESSION_SCAN_SETTINGS_SECTION);
+  const normalConcurrency = clampInteger(
+    config.get<number>('scanConcurrency', DEFAULT_SESSION_SCAN_CONCURRENCY),
+    1,
+    MAX_SESSION_SCAN_CONCURRENCY
+  );
+  const cautiousConcurrency = clampInteger(
+    config.get<number>('cautiousScanConcurrency', DEFAULT_CAUTION_SESSION_SCAN_CONCURRENCY),
+    1,
+    normalConcurrency
+  );
+
+  return {
+    adaptiveScanning: config.get<boolean>('adaptiveScanning', true),
+    normalConcurrency,
+    cautiousConcurrency
+  };
+}
+
+export function clampInteger(value: unknown, min: number, max: number): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return min;
+  }
+
+  return Math.max(min, Math.min(max, Math.floor(numeric)));
+}
+
+export function isUnstableFilesystemError(error: string): boolean {
+  return UNSTABLE_FILESYSTEM_ERROR_PATTERNS.some((pattern) => pattern.test(error));
+}
+
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
   concurrency: number,
   mapper: (item: T) => Promise<R>
-): Promise<R[]> {
+): Promise<ConcurrentMapResult<R>> {
+  const startedAt = Date.now();
   if (items.length === 0) {
-    return [];
+    return {
+      values: [],
+      failures: 0,
+      errors: [],
+      durationMs: 0
+    };
   }
 
   const results: Array<R | undefined> = new Array(items.length);
+  const errors: string[] = [];
+  let failures = 0;
   let nextIndex = 0;
   const workerCount = Math.max(1, Math.min(concurrency, items.length));
   await Promise.all(Array.from({ length: workerCount }, async () => {
@@ -653,11 +820,18 @@ export async function mapWithConcurrency<T, R>(
       try {
         results[currentIndex] = await mapper(items[currentIndex]);
       } catch (error) {
+        failures += 1;
+        errors.push(toErrorMessage(error));
         console.warn('Failed to load chat session tree item.', error);
       }
     }
   }));
-  return results.filter((result): result is R => result !== undefined);
+  return {
+    values: results.filter((result): result is R => result !== undefined),
+    failures,
+    errors,
+    durationMs: Date.now() - startedAt
+  };
 }
 
 export async function createChatSessionSummary(uri: vscode.Uri): Promise<ChatSessionSummary> {
