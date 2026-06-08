@@ -35,19 +35,26 @@ import {
 } from './chat';
 import type {
   ChatFile,
+  ChatSessionFolderNode,
   ChatSessionSummary,
   ChatSessionTreeNode
 } from './chat';
 
 export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSessionTreeNode> {
   private readonly changeEmitter = new vscode.EventEmitter<ChatSessionTreeNode | undefined | null | void>();
-  private rootNodes: ChatSessionTreeNode[] = [];
+  private rootNodes: ChatSessionTreeNode[] | undefined;
+  private readonly loadedDirectoryChildren = new Map<string, ChatSessionTreeNode[]>();
+  private readonly pendingDirectoryLoads = new Map<string, Promise<ChatSessionTreeNode[]>>();
+  private readonly folderNodesByDirectory = new Map<string, ChatSessionFolderNode>();
 
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
   getTreeItem(element: ChatSessionTreeNode): vscode.TreeItem {
     if (element.kind === 'folder') {
-      const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.Collapsed);
+      const collapsibleState = element.childrenLoaded && element.children.length === 0
+        ? vscode.TreeItemCollapsibleState.None
+        : vscode.TreeItemCollapsibleState.Collapsed;
+      const item = new vscode.TreeItem(element.label, collapsibleState);
       item.id = element.id;
       item.contextValue = 'onefilechatFolder';
       item.iconPath = new vscode.ThemeIcon('folder');
@@ -64,28 +71,52 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     return item;
   }
 
-  getChildren(element?: ChatSessionTreeNode): ChatSessionTreeNode[] {
+  async getChildren(element?: ChatSessionTreeNode): Promise<ChatSessionTreeNode[]> {
     if (element) {
-      return element.kind === 'folder' ? element.children : [];
+      return element.kind === 'folder' ? await this.loadFolderChildren(element) : [];
+    }
+
+    if (!this.rootNodes) {
+      this.rootNodes = await this.loadRootNodes();
     }
 
     return this.rootNodes;
   }
 
   async refresh(): Promise<void> {
-    const summaries = await loadChatSessionSummaries();
-    await this.setSessions(summaries);
+    this.rootNodes = undefined;
+    this.loadedDirectoryChildren.clear();
+    this.pendingDirectoryLoads.clear();
+    this.folderNodesByDirectory.clear();
+    await setSessionsViewVisibilityContext(hasSessionViewActivationContext());
+    this.changeEmitter.fire();
   }
 
   async upsertSession(uri: vscode.Uri): Promise<void> {
-    const nextSessions = this.getAllSessions().filter((session) => session.uri.toString() !== uri.toString());
-    nextSessions.push(await createChatSessionSummary(uri));
-    await this.setSessions(nextSessions);
+    const parentDirectoryUri = getParentDirectoryUri(uri);
+    const parentDirectoryKey = parentDirectoryUri.toString();
+    const existingChildren = this.loadedDirectoryChildren.get(parentDirectoryKey);
+    if (!existingChildren) {
+      return;
+    }
+
+    const nextChildren = sortChatSessionTreeNodes([
+      ...existingChildren.filter((node) => node.kind !== 'session' || node.uri.toString() !== uri.toString()),
+      await createChatSessionSummary(uri)
+    ]);
+    this.updateLoadedDirectoryChildren(parentDirectoryUri, nextChildren);
   }
 
   async removeSession(uri: vscode.Uri): Promise<void> {
-    const nextSessions = this.getAllSessions().filter((session) => session.uri.toString() !== uri.toString());
-    await this.setSessions(nextSessions);
+    const parentDirectoryUri = getParentDirectoryUri(uri);
+    const parentDirectoryKey = parentDirectoryUri.toString();
+    const existingChildren = this.loadedDirectoryChildren.get(parentDirectoryKey);
+    if (!existingChildren) {
+      return;
+    }
+
+    const nextChildren = existingChildren.filter((node) => node.kind !== 'session' || node.uri.toString() !== uri.toString());
+    this.updateLoadedDirectoryChildren(parentDirectoryUri, nextChildren);
   }
 
   getSessionByUri(uri: vscode.Uri): ChatSessionSummary | undefined {
@@ -106,14 +137,120 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       }
     };
 
-    visit(this.rootNodes);
+    visit(this.rootNodes ?? []);
     return sessions;
   }
 
-  private async setSessions(summaries: ChatSessionSummary[]): Promise<void> {
-    this.rootNodes = buildChatSessionTree(summaries);
-    await setSessionsViewVisibilityContext(summaries.length > 0 || await hasAnyChatDataDirectoryInWorkspace());
-    this.changeEmitter.fire();
+  private async loadRootNodes(): Promise<ChatSessionTreeNode[]> {
+    const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+    if (workspaceFolders.length === 0) {
+      return [];
+    }
+
+    if (workspaceFolders.length > 1) {
+      return workspaceFolders.map((workspaceFolder) => this.createDirectoryNode(workspaceFolder.uri, workspaceFolder.name));
+    }
+
+    const [workspaceFolder] = workspaceFolders;
+    const rootNodes = await this.loadDirectoryChildren(workspaceFolder.uri);
+    this.loadedDirectoryChildren.set(workspaceFolder.uri.toString(), rootNodes);
+    return rootNodes;
+  }
+
+  private async loadFolderChildren(folder: ChatSessionFolderNode): Promise<ChatSessionTreeNode[]> {
+    if (folder.childrenLoaded) {
+      return folder.children;
+    }
+
+    const directoryKey = folder.uri.toString();
+    const cachedChildren = this.loadedDirectoryChildren.get(directoryKey);
+    if (cachedChildren) {
+      folder.children = cachedChildren;
+      folder.childrenLoaded = true;
+      return cachedChildren;
+    }
+
+    const pendingLoad = this.pendingDirectoryLoads.get(directoryKey);
+    if (pendingLoad) {
+      return pendingLoad;
+    }
+
+    const load = this.loadDirectoryChildren(folder.uri)
+      .then((children) => {
+        this.loadedDirectoryChildren.set(directoryKey, children);
+        folder.children = children;
+        folder.childrenLoaded = true;
+        this.changeEmitter.fire(folder);
+        return children;
+      })
+      .finally(() => {
+        this.pendingDirectoryLoads.delete(directoryKey);
+      });
+    this.pendingDirectoryLoads.set(directoryKey, load);
+    return load;
+  }
+
+  private async loadDirectoryChildren(directoryUri: vscode.Uri): Promise<ChatSessionTreeNode[]> {
+    let entries: [string, vscode.FileType][];
+    try {
+      entries = await vscode.workspace.fs.readDirectory(directoryUri);
+    } catch {
+      return [];
+    }
+
+    const folders: ChatSessionFolderNode[] = [];
+    const sessionUris: vscode.Uri[] = [];
+
+    for (const [name, fileType] of entries) {
+      if ((fileType & vscode.FileType.Directory) !== 0) {
+        if (name !== CHAT_DIRECTORY_NAME && !shouldSkipChatDirectoryScan(name)) {
+          folders.push(this.createDirectoryNode(vscode.Uri.joinPath(directoryUri, name), name));
+        }
+        continue;
+      }
+
+      if (name.endsWith(CHAT_FILE_EXTENSION)) {
+        sessionUris.push(vscode.Uri.joinPath(directoryUri, name));
+      }
+    }
+
+    const sessions = await mapWithConcurrency(sessionUris, 8, createChatSessionSummary);
+    return sortChatSessionTreeNodes([...folders, ...sessions]);
+  }
+
+  private createDirectoryNode(uri: vscode.Uri, label: string): ChatSessionFolderNode {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+    const workspaceKey = workspaceFolder?.uri.toString() ?? '';
+    const relativePath = getDirectoryRelativePath(uri);
+    const node: ChatSessionFolderNode = {
+      kind: 'folder',
+      id: `folder:${workspaceKey}:${relativePath || uri.toString()}`,
+      label,
+      relativePath: relativePath || label,
+      uri,
+      children: [],
+      childrenLoaded: false
+    };
+    this.folderNodesByDirectory.set(uri.toString(), node);
+    return node;
+  }
+
+  private updateLoadedDirectoryChildren(directoryUri: vscode.Uri, children: ChatSessionTreeNode[]): void {
+    const directoryKey = directoryUri.toString();
+    this.loadedDirectoryChildren.set(directoryKey, children);
+
+    const folder = this.folderNodesByDirectory.get(directoryKey);
+    if (folder) {
+      folder.children = children;
+      folder.childrenLoaded = true;
+      this.changeEmitter.fire(folder);
+      return;
+    }
+
+    if (this.rootNodes && (vscode.workspace.workspaceFolders ?? []).length <= 1) {
+      this.rootNodes = children;
+      this.changeEmitter.fire();
+    }
   }
 }
 
@@ -401,6 +538,11 @@ export async function setSessionsViewVisibilityContext(isVisible: boolean): Prom
   await vscode.commands.executeCommand('setContext', SESSIONS_VIEW_VISIBILITY_CONTEXT, isVisible);
 }
 
+export function hasSessionViewActivationContext(): boolean {
+  return (vscode.workspace.workspaceFolders?.length ?? 0) > 0
+    || vscode.workspace.textDocuments.some((document) => document.uri.fsPath.endsWith(CHAT_FILE_EXTENSION));
+}
+
 export async function hasAnyChatDataDirectoryInWorkspace(): Promise<boolean> {
   const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
   for (const workspaceFolder of workspaceFolders) {
@@ -452,8 +594,10 @@ export function shouldSkipChatDirectoryScan(name: string): boolean {
   return [
     '.git',
     '.hg',
+    '.idea',
     '.next',
     '.svn',
+    '.vscode',
     '.yarn',
     'bin',
     'build',
@@ -464,6 +608,28 @@ export function shouldSkipChatDirectoryScan(name: string): boolean {
     'out',
     'target'
   ].includes(name);
+}
+
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex]);
+    }
+  }));
+  return results;
 }
 
 export async function createChatSessionSummary(uri: vscode.Uri): Promise<ChatSessionSummary> {
@@ -545,6 +711,8 @@ export function buildChatSessionTree(summaries: ChatSessionSummary[]): ChatSessi
         id: `workspace:${workspaceKey}`,
         label: workspaceFolder.name,
         relativePath: workspaceFolder.name,
+        uri: workspaceFolder.uri,
+        childrenLoaded: true,
         children: buildChatSessionFolderChildren(workspaceSummaries, [])
       });
     }
@@ -587,6 +755,8 @@ export function buildChatSessionFolderChildren(
         id: `folder:${groupSummaries[0]?.workspaceFolderKey ?? ''}:${nextSegments.join('/')}`,
         label: segment,
         relativePath: nextSegments.join('/'),
+        uri: getFolderUriForSegments(groupSummaries[0], nextSegments),
+        childrenLoaded: true,
         children: buildChatSessionFolderChildren(groupSummaries, nextSegments)
       };
     });
@@ -596,6 +766,29 @@ export function buildChatSessionFolderChildren(
 
 export function hasMatchingDirectorySegments(summary: ChatSessionSummary, parentSegments: string[]): boolean {
   return parentSegments.every((segment, index) => summary.directorySegments[index] === segment);
+}
+
+export function getFolderUriForSegments(summary: ChatSessionSummary | undefined, segments: readonly string[]): vscode.Uri {
+  const workspaceFolder = summary ? vscode.workspace.getWorkspaceFolder(summary.uri) : undefined;
+  if (workspaceFolder) {
+    return vscode.Uri.joinPath(workspaceFolder.uri, ...segments);
+  }
+
+  if (summary) {
+    return vscode.Uri.file(path.join(path.dirname(summary.uri.fsPath), ...segments.slice(summary.directorySegments.length)));
+  }
+
+  return vscode.Uri.file(path.sep);
+}
+
+export function sortChatSessionTreeNodes(nodes: readonly ChatSessionTreeNode[]): ChatSessionTreeNode[] {
+  const folders = nodes
+    .filter((node): node is ChatSessionFolderNode => node.kind === 'folder')
+    .sort((left, right) => compareSessionLabels(left.label, right.label));
+  const sessions = nodes
+    .filter((node): node is ChatSessionSummary => node.kind === 'session')
+    .sort((left, right) => compareIsoDesc(left.updatedAt, right.updatedAt) || compareSessionLabels(left.title, right.title));
+  return [...folders, ...sessions];
 }
 
 export function compareSessionLabels(left: string, right: string): number {
@@ -651,6 +844,19 @@ export function getSessionRelativePath(uri: vscode.Uri): string {
   }
 
   return path.relative(workspaceFolder.uri.fsPath, uri.fsPath).replace(/\\/g, '/');
+}
+
+export function getDirectoryRelativePath(uri: vscode.Uri): string {
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+  if (!workspaceFolder) {
+    return path.basename(uri.fsPath);
+  }
+
+  return path.relative(workspaceFolder.uri.fsPath, uri.fsPath).replace(/\\/g, '/');
+}
+
+export function getParentDirectoryUri(uri: vscode.Uri): vscode.Uri {
+  return uri.with({ path: path.posix.dirname(uri.path) });
 }
 
 export function compareIsoDesc(left: string, right: string): number {
@@ -747,4 +953,3 @@ export function resolveRawJsonTargetUri(input?: ChatSessionSummary | vscode.Uri)
 
   return undefined;
 }
-

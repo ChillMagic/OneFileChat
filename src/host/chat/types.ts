@@ -163,7 +163,9 @@ export interface ChatSessionFolderNode {
   id: string;
   label: string;
   relativePath: string;
+  uri: vscode.Uri;
   children: ChatSessionTreeNode[];
+  childrenLoaded?: boolean;
 }
 
 export type ChatSessionTreeNode = ChatSessionFolderNode | ChatSessionSummary;
