@@ -2,7 +2,7 @@
   "name": "onefilechat",
   "displayName": "One File Chat",
   "description": "%extension.description%",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "chillmagic",
   "license": "MIT",
   "repository": {
