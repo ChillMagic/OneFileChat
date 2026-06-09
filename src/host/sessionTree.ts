@@ -42,6 +42,8 @@ import type {
 
 interface DirectoryChildrenLoadResult {
   children: ChatSessionTreeNode[];
+  sessionUris: vscode.Uri[];
+  startedAt: number;
   error?: string;
 }
 
@@ -75,6 +77,8 @@ const DEFAULT_CAUTION_SESSION_SCAN_CONCURRENCY = 2;
 const MAX_SESSION_SCAN_CONCURRENCY = 64;
 const SLOW_SESSION_SCAN_THRESHOLD_MS = 3_000;
 const CAUTIOUS_SCAN_RECOVERY_SUCCESSES = 3;
+const SESSION_HYDRATION_FLUSH_BATCH_SIZE = 16;
+const SESSION_HYDRATION_FLUSH_INTERVAL_MS = 200;
 const UNSTABLE_FILESYSTEM_ERROR_PATTERNS = [
   /503/i,
   /blockedtemporarily/i,
@@ -94,6 +98,9 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
   private readonly pendingDirectoryLoads = new Map<string, Promise<ChatSessionTreeNode[]>>();
   private readonly folderNodesByDirectory = new Map<string, ChatSessionFolderNode>();
   private readonly scanProfiles = new Map<string, SessionScanProfile>();
+  private readonly directoryHydrationIds = new Map<string, number>();
+  private nextDirectoryHydrationId = 1;
+  private treeGeneration = 0;
 
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
@@ -105,7 +112,7 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       const item = new vscode.TreeItem(element.label, collapsibleState);
       item.id = element.id;
       item.contextValue = 'onefilechatFolder';
-      item.iconPath = new vscode.ThemeIcon(element.loadError ? 'warning' : 'folder');
+      item.iconPath = new vscode.ThemeIcon(element.loadError ? 'warning' : element.isLoading ? 'loading~spin' : 'folder');
       item.tooltip = createFolderTooltip(element);
       return item;
     }
@@ -113,8 +120,8 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     const item = new vscode.TreeItem(element.title, vscode.TreeItemCollapsibleState.None);
     item.id = element.uri.toString();
     item.contextValue = 'onefilechatSession';
-    item.description = formatSessionUpdatedAt(element.updatedAt);
-    item.iconPath = new vscode.ThemeIcon(element.hasError ? 'warning' : 'comment-discussion');
+    item.description = element.isLoading ? t('host.sessionLoadingDescription') : formatSessionUpdatedAt(element.updatedAt);
+    item.iconPath = new vscode.ThemeIcon(element.isLoading ? 'loading~spin' : element.hasError ? 'warning' : 'comment-discussion');
     item.tooltip = createSessionTooltip(element);
     return item;
   }
@@ -136,6 +143,8 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     this.loadedDirectoryChildren.clear();
     this.pendingDirectoryLoads.clear();
     this.folderNodesByDirectory.clear();
+    this.directoryHydrationIds.clear();
+    this.treeGeneration += 1;
     await setSessionsViewVisibilityContext(hasSessionViewActivationContext());
     this.changeEmitter.fire();
   }
@@ -207,6 +216,7 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
 
     const rootNodes = result.children;
     this.loadedDirectoryChildren.set(workspaceFolder.uri.toString(), rootNodes);
+    this.startDirectorySessionHydration(workspaceFolder.uri, result.sessionUris, result.startedAt);
     return rootNodes;
   }
 
@@ -221,6 +231,7 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       folder.children = cachedChildren;
       folder.childrenLoaded = true;
       folder.loadError = undefined;
+      folder.isLoading = this.directoryHydrationIds.has(directoryKey);
       return cachedChildren;
     }
 
@@ -236,6 +247,7 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
           folder.children = [];
           folder.childrenLoaded = false;
           folder.loadError = result.error;
+          folder.isLoading = false;
           this.changeEmitter.fire(folder);
           return [];
         }
@@ -245,6 +257,8 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
         folder.children = children;
         folder.childrenLoaded = true;
         folder.loadError = undefined;
+        folder.isLoading = result.sessionUris.length > 0;
+        this.startDirectorySessionHydration(folder.uri, result.sessionUris, result.startedAt);
         this.changeEmitter.fire(folder);
         return children;
       })
@@ -267,7 +281,7 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
         failures: 1,
         errors: [message]
       });
-      return { children: [], error: message };
+      return { children: [], sessionUris: [], startedAt, error: message };
     }
 
     const folders: ChatSessionFolderNode[] = [];
@@ -286,21 +300,134 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       }
     }
 
-    const concurrency = this.getDirectoryScanConcurrency(directoryUri);
-    const sessionResult = await mapWithConcurrency(sessionUris, concurrency, createChatSessionSummary);
-    const sessionErrors = [
-      ...sessionResult.errors,
-      ...sessionResult.values
-        .map((session) => session.error)
-        .filter((error): error is string => Boolean(error && isUnstableFilesystemError(error)))
-    ];
-    this.recordDirectoryScanResult(directoryUri, {
-      durationMs: Date.now() - startedAt,
-      failures: sessionResult.failures + sessionErrors.length,
-      errors: sessionErrors
-    });
+    if (sessionUris.length === 0) {
+      this.recordDirectoryScanResult(directoryUri, {
+        durationMs: Date.now() - startedAt,
+        failures: 0,
+        errors: []
+      });
+    }
 
-    return { children: sortChatSessionTreeNodes([...folders, ...sessionResult.values]) };
+    return {
+      children: sortChatSessionTreeNodes([
+        ...folders,
+        ...sessionUris.map((uri) => createPendingChatSessionSummary(uri))
+      ]),
+      sessionUris,
+      startedAt
+    };
+  }
+
+  private startDirectorySessionHydration(directoryUri: vscode.Uri, sessionUris: readonly vscode.Uri[], startedAt: number): void {
+    if (sessionUris.length === 0) {
+      return;
+    }
+
+    const directoryKey = directoryUri.toString();
+    const generation = this.treeGeneration;
+    const hydrationId = this.nextDirectoryHydrationId;
+    this.nextDirectoryHydrationId += 1;
+    this.directoryHydrationIds.set(directoryKey, hydrationId);
+    this.setDirectoryHydrating(directoryUri, true);
+
+    let flushTimer: ReturnType<typeof setTimeout> | undefined;
+    const pendingSummaries: ChatSessionSummary[] = [];
+    const isCurrentHydration = () => this.treeGeneration === generation && this.directoryHydrationIds.get(directoryKey) === hydrationId;
+    const flush = () => {
+      if (flushTimer !== undefined) {
+        clearTimeout(flushTimer);
+        flushTimer = undefined;
+      }
+
+      if (pendingSummaries.length === 0 || !isCurrentHydration()) {
+        pendingSummaries.length = 0;
+        return;
+      }
+
+      const summaries = pendingSummaries.splice(0);
+      this.mergeHydratedSessions(directoryUri, summaries);
+    };
+    const scheduleFlush = () => {
+      if (pendingSummaries.length >= SESSION_HYDRATION_FLUSH_BATCH_SIZE) {
+        flush();
+        return;
+      }
+
+      if (flushTimer === undefined) {
+        flushTimer = setTimeout(flush, SESSION_HYDRATION_FLUSH_INTERVAL_MS);
+      }
+    };
+
+    void (async () => {
+      const concurrency = this.getDirectoryScanConcurrency(directoryUri);
+      const sessionResult = await mapWithConcurrency(
+        sessionUris,
+        concurrency,
+        createChatSessionSummary,
+        (summary, _index, uri, error) => {
+          if (!isCurrentHydration()) {
+            return;
+          }
+
+          pendingSummaries.push(summary ?? createFailedChatSessionSummary(uri, error ?? t('host.sessionLoadFailedUnknown')));
+          scheduleFlush();
+        }
+      );
+      flush();
+
+      if (!isCurrentHydration()) {
+        return;
+      }
+
+      const sessionErrors = [
+        ...sessionResult.errors,
+        ...sessionResult.values
+          .map((session) => session.error)
+          .filter((error): error is string => Boolean(error && isUnstableFilesystemError(error)))
+      ];
+      this.recordDirectoryScanResult(directoryUri, {
+        durationMs: Date.now() - startedAt,
+        failures: sessionResult.failures + sessionErrors.length,
+        errors: sessionErrors
+      });
+      this.setDirectoryHydrating(directoryUri, false);
+
+      if (this.directoryHydrationIds.get(directoryKey) === hydrationId) {
+        this.directoryHydrationIds.delete(directoryKey);
+      }
+    })();
+  }
+
+  private mergeHydratedSessions(directoryUri: vscode.Uri, summaries: readonly ChatSessionSummary[]): void {
+    if (summaries.length === 0) {
+      return;
+    }
+
+    const directoryKey = directoryUri.toString();
+    const existingChildren = this.loadedDirectoryChildren.get(directoryKey);
+    if (!existingChildren) {
+      return;
+    }
+
+    const summariesByUri = new Map(summaries.map((summary) => [summary.uri.toString(), summary]));
+    const nextChildren = sortChatSessionTreeNodes(existingChildren.map((node) => {
+      if (node.kind !== 'session') {
+        return node;
+      }
+
+      return summariesByUri.get(node.uri.toString()) ?? node;
+    }));
+    this.updateLoadedDirectoryChildren(directoryUri, nextChildren);
+  }
+
+  private setDirectoryHydrating(directoryUri: vscode.Uri, isLoading: boolean): void {
+    const folder = this.folderNodesByDirectory.get(directoryUri.toString());
+    if (!folder || folder.isLoading === isLoading) {
+      return;
+    }
+
+    folder.isLoading = isLoading;
+    this.changeEmitter.fire(folder);
   }
 
   private createDirectoryNode(uri: vscode.Uri, label: string, loadError?: string): ChatSessionFolderNode {
@@ -796,7 +923,8 @@ export function isUnstableFilesystemError(error: string): boolean {
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
   concurrency: number,
-  mapper: (item: T) => Promise<R>
+  mapper: (item: T) => Promise<R>,
+  onSettled?: (value: R | undefined, index: number, item: T, error?: string) => void
 ): Promise<ConcurrentMapResult<R>> {
   const startedAt = Date.now();
   if (items.length === 0) {
@@ -819,10 +947,13 @@ export async function mapWithConcurrency<T, R>(
       nextIndex += 1;
       try {
         results[currentIndex] = await mapper(items[currentIndex]);
+        onSettled?.(results[currentIndex], currentIndex, items[currentIndex]);
       } catch (error) {
         failures += 1;
-        errors.push(toErrorMessage(error));
+        const message = toErrorMessage(error);
+        errors.push(message);
         console.warn('Failed to load chat session tree item.', error);
+        onSettled?.(undefined, currentIndex, items[currentIndex], message);
       }
     }
   }));
@@ -831,6 +962,41 @@ export async function mapWithConcurrency<T, R>(
     failures,
     errors,
     durationMs: Date.now() - startedAt
+  };
+}
+
+export function createPendingChatSessionSummary(uri: vscode.Uri): ChatSessionSummary {
+  const fallbackTitle = trimChatFileSuffix(path.basename(uri.fsPath));
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+  const relativePath = getSessionRelativePath(uri);
+  const directoryPath = getSessionDirectoryPath(relativePath);
+  const directorySegments = directoryPath ? directoryPath.split('/') : [];
+
+  return {
+    kind: 'session',
+    uri,
+    title: fallbackTitle,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    messageCount: 0,
+    preview: '',
+    relativePath,
+    directoryPath,
+    directorySegments,
+    workspaceFolderKey: workspaceFolder?.uri.toString() ?? '',
+    workspaceFolderName: workspaceFolder?.name,
+    hasError: false,
+    isLoading: true
+  };
+}
+
+export function createFailedChatSessionSummary(uri: vscode.Uri, error: string): ChatSessionSummary {
+  const summary = createPendingChatSessionSummary(uri);
+  return {
+    ...summary,
+    hasError: true,
+    error,
+    isLoading: false
   };
 }
 
@@ -989,8 +1155,22 @@ export function sortChatSessionTreeNodes(nodes: readonly ChatSessionTreeNode[]):
     .sort((left, right) => compareSessionLabels(left.label, right.label));
   const sessions = nodes
     .filter((node): node is ChatSessionSummary => node.kind === 'session')
-    .sort((left, right) => compareIsoDesc(left.updatedAt, right.updatedAt) || compareSessionLabels(left.title, right.title));
+    .sort(compareChatSessionSummaries);
   return [...folders, ...sessions];
+}
+
+export function compareChatSessionSummaries(left: ChatSessionSummary, right: ChatSessionSummary): number {
+  const leftLoading = Boolean(left.isLoading);
+  const rightLoading = Boolean(right.isLoading);
+  if (leftLoading && rightLoading) {
+    return compareSessionLabels(left.title, right.title);
+  }
+
+  if (leftLoading !== rightLoading) {
+    return leftLoading ? 1 : -1;
+  }
+
+  return compareIsoDesc(left.updatedAt, right.updatedAt) || compareSessionLabels(left.title, right.title);
 }
 
 export function compareSessionLabels(left: string, right: string): number {
@@ -1086,6 +1266,10 @@ export function createSessionTooltip(session: ChatSessionSummary): vscode.Markdo
   markdown.isTrusted = false;
   markdown.appendMarkdown(`**${escapeMarkdown(session.title)}**\n\n`);
   markdown.appendMarkdown(t('host.sessionPathMd', { path: escapeMarkdown(session.relativePath) }));
+  if (session.isLoading) {
+    markdown.appendMarkdown(t('host.sessionLoadingMd'));
+    return markdown;
+  }
   markdown.appendMarkdown(t('host.sessionStatsMd', { count: session.messageCount, time: escapeMarkdown(formatSessionUpdatedAt(session.updatedAt)) }));
   if (session.assistantName) {
     markdown.appendMarkdown(t('host.sessionAssistantMd', { name: escapeMarkdown(session.assistantName) }));
@@ -1106,6 +1290,8 @@ export function createFolderTooltip(folder: ChatSessionFolderNode): vscode.Markd
   markdown.appendMarkdown(t('host.sessionPathMd', { path: escapeMarkdown(folder.relativePath || folder.label) }));
   if (folder.loadError) {
     markdown.appendMarkdown(t('host.sessionFolderLoadErrorMd', { detail: escapeMarkdown(folder.loadError) }));
+  } else if (folder.isLoading) {
+    markdown.appendMarkdown(t('host.sessionFolderLoadingMd'));
   }
   return markdown;
 }

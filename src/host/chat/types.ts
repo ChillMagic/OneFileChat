@@ -156,6 +156,7 @@ export interface ChatSessionSummary {
   workspaceFolderName?: string;
   hasError: boolean;
   error?: string;
+  isLoading?: boolean;
 }
 
 export interface ChatSessionFolderNode {
@@ -167,6 +168,7 @@ export interface ChatSessionFolderNode {
   children: ChatSessionTreeNode[];
   childrenLoaded?: boolean;
   loadError?: string;
+  isLoading?: boolean;
 }
 
 export type ChatSessionTreeNode = ChatSessionFolderNode | ChatSessionSummary;
