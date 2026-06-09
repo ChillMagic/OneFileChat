@@ -47,6 +47,11 @@ interface DirectoryChildrenLoadResult {
   error?: string;
 }
 
+interface ChildFolderCandidate {
+  uri: vscode.Uri;
+  label: string;
+}
+
 interface ConcurrentMapResult<T> {
   values: T[];
   failures: number;
@@ -71,10 +76,18 @@ interface SessionScanResult {
   errors: string[];
 }
 
+interface FolderVisibilityScanResult {
+  folders: ChatSessionFolderNode[];
+  failures: number;
+  errors: string[];
+  durationMs: number;
+}
+
 const SESSION_SCAN_SETTINGS_SECTION = 'onefilechat.sessions';
 const DEFAULT_SESSION_SCAN_CONCURRENCY = 8;
 const DEFAULT_CAUTION_SESSION_SCAN_CONCURRENCY = 2;
 const MAX_SESSION_SCAN_CONCURRENCY = 64;
+const MAX_FOLDER_VISIBILITY_CONCURRENCY = 4;
 const SLOW_SESSION_SCAN_THRESHOLD_MS = 3_000;
 const CAUTIOUS_SCAN_RECOVERY_SUCCESSES = 3;
 const SESSION_HYDRATION_FLUSH_BATCH_SIZE = 16;
@@ -284,13 +297,16 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       return { children: [], sessionUris: [], startedAt, error: message };
     }
 
-    const folders: ChatSessionFolderNode[] = [];
+    const folderCandidates: ChildFolderCandidate[] = [];
     const sessionUris: vscode.Uri[] = [];
 
     for (const [name, fileType] of entries) {
       if ((fileType & vscode.FileType.Directory) !== 0) {
         if (name !== CHAT_DIRECTORY_NAME && !shouldSkipChatDirectoryScan(name)) {
-          folders.push(this.createDirectoryNode(vscode.Uri.joinPath(directoryUri, name), name));
+          folderCandidates.push({
+            uri: vscode.Uri.joinPath(directoryUri, name),
+            label: name
+          });
         }
         continue;
       }
@@ -300,21 +316,50 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       }
     }
 
-    if (sessionUris.length === 0) {
+    const folderVisibilityResult = await this.filterVisibleChildFolders(directoryUri, folderCandidates);
+    if (sessionUris.length === 0 || folderVisibilityResult.failures > 0) {
       this.recordDirectoryScanResult(directoryUri, {
         durationMs: Date.now() - startedAt,
-        failures: 0,
-        errors: []
+        failures: folderVisibilityResult.failures,
+        errors: folderVisibilityResult.errors
       });
     }
 
     return {
       children: sortChatSessionTreeNodes([
-        ...folders,
+        ...folderVisibilityResult.folders,
         ...sessionUris.map((uri) => createPendingChatSessionSummary(uri))
       ]),
       sessionUris,
       startedAt
+    };
+  }
+
+  private async filterVisibleChildFolders(
+    directoryUri: vscode.Uri,
+    folderCandidates: readonly ChildFolderCandidate[]
+  ): Promise<FolderVisibilityScanResult> {
+    if (folderCandidates.length === 0) {
+      return {
+        folders: [],
+        failures: 0,
+        errors: [],
+        durationMs: 0
+      };
+    }
+
+    const concurrency = Math.min(this.getDirectoryScanConcurrency(directoryUri), MAX_FOLDER_VISIBILITY_CONCURRENCY);
+    const result = await mapWithConcurrency(folderCandidates, concurrency, async (folder) => {
+      return await directoryContainsDirectChatSessions(folder.uri)
+        ? this.createDirectoryNode(folder.uri, folder.label)
+        : undefined;
+    });
+
+    return {
+      folders: result.values.filter((folder): folder is ChatSessionFolderNode => Boolean(folder)),
+      failures: result.failures,
+      errors: result.errors,
+      durationMs: result.durationMs
     };
   }
 
@@ -529,6 +574,11 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
   private getScanProfileKey(directoryUri: vscode.Uri): string {
     return vscode.workspace.getWorkspaceFolder(directoryUri)?.uri.toString() ?? directoryUri.toString();
   }
+}
+
+export async function directoryContainsDirectChatSessions(directoryUri: vscode.Uri): Promise<boolean> {
+  const entries = await vscode.workspace.fs.readDirectory(directoryUri);
+  return entries.some(([name, fileType]) => (fileType & vscode.FileType.File) !== 0 && name.endsWith(CHAT_FILE_EXTENSION));
 }
 
 export async function createNewChatFile(resourceUri?: vscode.Uri): Promise<void> {
