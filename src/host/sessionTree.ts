@@ -125,7 +125,11 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
       const item = new vscode.TreeItem(element.label, collapsibleState);
       item.id = element.id;
       item.contextValue = 'onefilechatFolder';
-      item.iconPath = new vscode.ThemeIcon(element.loadError ? 'warning' : element.isLoading ? 'loading~spin' : 'folder');
+      // Note: the icon id must not be 'folder', otherwise VS Code's Aligner left-aligns
+      // the child session rows (only visible with icon themes that have file icons but no
+      // folder icons). Use 'folder-opened' (id !== 'folder') to keep child session rows
+      // right-aligned while still showing the loading spinner.
+      item.iconPath = new vscode.ThemeIcon(element.loadError ? 'warning' : element.isLoading ? 'loading~spin' : 'folder-opened');
       item.tooltip = createFolderTooltip(element);
       return item;
     }
