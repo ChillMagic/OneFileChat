@@ -92,6 +92,7 @@ const SLOW_SESSION_SCAN_THRESHOLD_MS = 3_000;
 const CAUTIOUS_SCAN_RECOVERY_SUCCESSES = 3;
 const SESSION_HYDRATION_FLUSH_BATCH_SIZE = 16;
 const SESSION_HYDRATION_FLUSH_INTERVAL_MS = 200;
+export const OPEN_CHAT_SESSION_FROM_TREE_COMMAND = 'onefilechat.openChatSessionFromTree';
 const UNSTABLE_FILESYSTEM_ERROR_PATTERNS = [
   /503/i,
   /blockedtemporarily/i,
@@ -140,6 +141,11 @@ export class ChatSessionsProvider implements vscode.TreeDataProvider<ChatSession
     item.description = element.isLoading ? t('host.sessionLoadingDescription') : formatSessionUpdatedAt(element.updatedAt);
     item.iconPath = new vscode.ThemeIcon(element.isLoading ? 'loading~spin' : element.hasError ? 'warning' : 'comment-discussion');
     item.tooltip = createSessionTooltip(element);
+    item.command = {
+      command: OPEN_CHAT_SESSION_FROM_TREE_COMMAND,
+      title: element.title,
+      arguments: [element.uri]
+    };
     return item;
   }
 

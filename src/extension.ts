@@ -14,6 +14,7 @@ import type {
 import { OneFileChatEditorProvider } from './host/editorProvider';
 import {
   ChatSessionsProvider,
+  OPEN_CHAT_SESSION_FROM_TREE_COMMAND,
   closeChatEditors,
   confirmDeleteChatSessions,
   createNewChatFile,
@@ -60,6 +61,41 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(sessionsTreeView);
 
   let pendingSessionPreviewOpen: ReturnType<typeof setTimeout> | undefined;
+  const scheduleSessionPreviewOpen = (targetSessionUri: vscode.Uri) => {
+    if (pendingSessionPreviewOpen !== undefined) {
+      clearTimeout(pendingSessionPreviewOpen);
+      pendingSessionPreviewOpen = undefined;
+    }
+
+    pendingSessionPreviewOpen = setTimeout(() => {
+      pendingSessionPreviewOpen = undefined;
+
+      if (sessionsTreeView.selection.length !== 1) {
+        return;
+      }
+
+      const currentSelection = sessionsTreeView.selection[0];
+      if (currentSelection.kind !== 'session' || currentSelection.uri.toString() !== targetSessionUri.toString()) {
+        return;
+      }
+
+      void vscode.commands.executeCommand('vscode.openWith', targetSessionUri, VIEW_TYPE, {
+        preview: true,
+        preserveFocus: true
+      });
+    }, 120);
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(OPEN_CHAT_SESSION_FROM_TREE_COMMAND, (targetSessionUri?: vscode.Uri) => {
+      if (!targetSessionUri) {
+        return;
+      }
+
+      scheduleSessionPreviewOpen(targetSessionUri);
+    })
+  );
+
   context.subscriptions.push(
     sessionsTreeView.onDidChangeSelection((event) => {
       if (pendingSessionPreviewOpen !== undefined) {
@@ -77,23 +113,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const targetSessionUri = selectedItem.uri;
-      pendingSessionPreviewOpen = setTimeout(() => {
-        pendingSessionPreviewOpen = undefined;
-
-        if (sessionsTreeView.selection.length !== 1) {
-          return;
-        }
-
-        const currentSelection = sessionsTreeView.selection[0];
-        if (currentSelection.kind !== 'session' || currentSelection.uri.toString() !== targetSessionUri.toString()) {
-          return;
-        }
-
-        void vscode.commands.executeCommand('vscode.openWith', targetSessionUri, VIEW_TYPE, {
-          preview: true,
-          preserveFocus: true
-        });
-      }, 120);
+      scheduleSessionPreviewOpen(targetSessionUri);
     })
   );
   context.subscriptions.push({
